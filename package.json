@@ -1,0 +1,50 @@
+{
+  "name": "a11y-gate",
+  "version": "1.0.0",
+  "description": "Drop-in accessibility gate for CI/CD — runs axe-core against live or static pages and fails the build on critical violations.",
+  "main": "scripts/a11y-check.js",
+  "bin": {
+    "a11y-gate": "scripts/a11y-check.js"
+  },
+  "files": [
+    "scripts",
+    "a11y.config.example.js",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/run-tests.js"
+  },
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "axe-core",
+    "axe",
+    "wcag",
+    "ci",
+    "ci-cd",
+    "puppeteer",
+    "prebuild",
+    "postbuild",
+    "build-gate",
+    "lint"
+  ],
+  "license": "MIT",
+  "author": "Cait Burke",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheCBCreative/a11y-gate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TheCBCreative/a11y-gate/issues"
+  },
+  "homepage": "https://github.com/TheCBCreative/a11y-gate#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axe-core": "^4.13.0",
+    "puppeteer": "^25.0.0"
+  }
+}
