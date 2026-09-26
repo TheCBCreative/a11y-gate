@@ -1,5 +1,6 @@
 # a11y-gate
 
+[![npm](https://img.shields.io/npm/v/a11y-gate.svg)](https://www.npmjs.com/package/a11y-gate)
 [![CI](https://github.com/TheCBCreative/a11y-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/TheCBCreative/a11y-gate/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -19,16 +20,8 @@ users — everything else stays visible without stopping anyone's work.
 
 ## Install
 
-Not published to npm yet — install directly from this repo:
-
 ```bash
-npm install --save-dev github:TheCBCreative/a11y-gate
-```
-
-Pin to a specific release/tag instead of always tracking `main`:
-
-```bash
-npm install --save-dev github:TheCBCreative/a11y-gate#v1.0.0
+npm install --save-dev a11y-gate
 ```
 
 This pulls in `puppeteer` and `axe-core` as part of the install — no separate setup step.
