@@ -18,6 +18,8 @@
  *   --url <url>           Add a URL to check (repeatable)
  *   --dir <path>          Add a directory of static HTML to check (repeatable)
  *   --fail-on <level>     critical | serious | moderate | minor (default: critical)
+ *   --reduced-motion      Audit with prefers-reduced-motion: reduce, so pages
+ *                         that animate content in are checked in their final state
  *   --json-report <path>  Write a full JSON report to this path
  *   --no-color            Disable colored output
  *   --help                Show this help text
@@ -84,6 +86,7 @@ function parseArgs(argv) {
     else if (a === '--dir') args.dirs.push(argv[++i]);
     else if (a === '--fail-on') args.failOn = argv[++i];
     else if (a === '--json-report') args.jsonReport = argv[++i];
+    else if (a === '--reduced-motion') args.reducedMotion = true;
     else if (a === '--no-color') {
       /* handled above */
     } else if (a.startsWith('-')) {
@@ -140,6 +143,7 @@ function loadConfig(args, cwd) {
       server: null, // { command, url, readyTimeout }
       jsonReport: null,
       excludePaths: [], // substrings to skip when walking staticDirs
+      reducedMotion: false, // emulate prefers-reduced-motion: reduce
     },
     fileConfig
   );
@@ -149,6 +153,7 @@ function loadConfig(args, cwd) {
   if (args.dirs.length) config.staticDirs = config.staticDirs.concat(args.dirs);
   if (args.failOn) config.failOn = args.failOn;
   if (args.jsonReport) config.jsonReport = args.jsonReport;
+  if (args.reducedMotion) config.reducedMotion = true;
 
   // Auto-detect static output dirs only if nothing was configured or passed at all
   const nothingConfigured =
@@ -269,6 +274,10 @@ async function auditTarget(browser, target, config, axeSource) {
   const result = { label: target.label, target: target.target, error: null, violations: [] };
 
   try {
+    // Entrance animations caught mid-fade read as low contrast; reduced motion shows the settled page.
+    if (config.reducedMotion) {
+      await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    }
     await page.goto(target.target, { waitUntil: 'networkidle0', timeout: config.timeout });
     await page.evaluate(axeSource);
 

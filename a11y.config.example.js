@@ -64,5 +64,8 @@ module.exports = {
   concurrency: 4, // how many pages to audit in parallel
   timeout: 30000, // ms, per-page navigation timeout
   viewport: { width: 1280, height: 900 },
+  // Audit with prefers-reduced-motion: reduce. Turn on for sites that animate
+  // content in on load, so text isn't measured mid-fade.
+  reducedMotion: false,
   jsonReport: null, // e.g. 'a11y-report.json' to write a full machine-readable report
 };

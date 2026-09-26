@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Animated Fixture</title>
+  <style>
+    .fade { color: #333; animation: fade 60s linear both; }
+    @keyframes fade { from { opacity: 0.15; } }
+    @media (prefers-reduced-motion: reduce) { .fade { animation: none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Hello</h1>
+    <p class="fade">This text fades in slowly, but is high contrast once it settles.</p>
+  </main>
+</body>
+</html>

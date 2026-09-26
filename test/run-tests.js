@@ -81,6 +81,23 @@ console.log('Running a11y-gate self-tests...\n');
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
+// 4. Text still fading in reads as low contrast; --reduced-motion audits the settled page
+{
+  const motionDir = path.join(__dirname, 'motion');
+  const animated = run(['--dir', motionDir, '--fail-on', 'serious']);
+  check(
+    'flags text caught mid-animation',
+    animated.status === 1 && animated.stdout.includes('color-contrast'),
+    `expected exit 1 with color-contrast, got ${animated.status}\n${animated.stdout}\n${animated.stderr}`
+  );
+  const settled = run(['--dir', motionDir, '--fail-on', 'serious', '--reduced-motion']);
+  check(
+    'audits the settled page with --reduced-motion',
+    settled.status === 0,
+    `expected exit 0, got ${settled.status}\n${settled.stdout}\n${settled.stderr}`
+  );
+}
+
 console.log('');
 if (failures > 0) {
   console.error(`${failures} self-test(s) failed.`);

@@ -67,7 +67,7 @@ config file at all, a11y-gate auto-detects a common build folder (`dist`, `build
 one exists, and otherwise skips itself (exit 0) with a message telling you to configure it — dropping
 this into a project never breaks an unconfigured build.
 
-Full option reference (ignoreRules, tags, concurrency, timeout, viewport, jsonReport, etc.) is documented
+Full option reference (ignoreRules, tags, concurrency, timeout, viewport, reducedMotion, jsonReport, etc.) is documented
 inline in [`a11y.config.example.js`](a11y.config.example.js).
 
 ## Wire it into your build
@@ -139,6 +139,7 @@ a11y-gate \
   --dir dist \
   --fail-on serious \
   --json-report a11y-report.json \
+  --reduced-motion \
   --config custom-a11y.config.js \
   --no-color
 ```
@@ -153,6 +154,9 @@ a11y-gate \
 - **False positives on a specific rule** — add the axe-core rule ID to `ignoreRules` in that project's
   config rather than disabling the whole check. Rule IDs are printed in the report; see the
   [axe-core rule list](https://github.com/dequelabs/axe-core/blob/develop/doc/rule-descriptions.md).
+- **Contrast failures that come and go** — text caught mid-way through an entrance animation is measured
+  at its current opacity. Set `reducedMotion: true` (or pass `--reduced-motion`) so pages load with
+  `prefers-reduced-motion: reduce` and are audited in their settled state.
 - **A single flaky/slow page times out** — raise `timeout` (ms) in the config; it applies per-page.
 
 ## Development
