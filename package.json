@@ -41,7 +41,7 @@
   },
   "homepage": "https://github.com/TheCBCreative/a11y-gate#readme",
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12"
   },
   "dependencies": {
     "axe-core": "^4.13.0",

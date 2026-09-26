@@ -24,7 +24,7 @@ users — everything else stays visible without stopping anyone's work.
 npm install --save-dev a11y-gate
 ```
 
-This pulls in `puppeteer` and `axe-core` as part of the install — no separate setup step.
+This pulls in `puppeteer` and `axe-core` as part of the install — no separate setup step. Requires Node 22.12 or later, Puppeteer's minimum.
 
 ## Configure
 
