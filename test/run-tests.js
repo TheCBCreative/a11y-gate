@@ -32,10 +32,11 @@ let failures = 0;
 // synchronous spawn would freeze this process's event loop for the child's
 // entire lifetime, so that in-process server could never actually respond —
 // the request would hang until the CLI's own timeout, not ours.
-function run(args, cwd) {
+function run(args, cwd, envOverrides) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: cwd || process.cwd(),
+      env: envOverrides ? Object.assign({}, process.env, envOverrides) : process.env,
     });
     let stdout = '';
     let stderr = '';
@@ -494,6 +495,105 @@ async function main() {
       '--no-interactive-states misses the same violation',
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // 24. Regression test for the executable-bit bug that shipped once
+  //     already: npm's POSIX bin shim invokes this file directly (not via
+  //     `node`), so it must stay executable and its shebang must work.
+  if (process.platform !== 'win32') {
+    const mode = fs.statSync(CLI).mode;
+    check('the CLI file is directly executable (npm bin shim relies on this)', (mode & 0o111) !== 0, `mode: ${mode.toString(8)}`);
+
+    const result = await new Promise((resolve) => {
+      const child = spawn(CLI, ['--help']); // spawned directly, not via node
+      let stdout = '';
+      child.stdout.on('data', (d) => (stdout += d));
+      child.on('error', () => resolve({ status: null, stdout: '' }));
+      child.on('close', (status) => resolve({ status, stdout }));
+    });
+    check(
+      'the CLI runs directly via its shebang, the way npx invokes it',
+      result.status === 0 && result.stdout.includes('Usage:'),
+      `expected exit 0 with usage text, got ${JSON.stringify(result)}`
+    );
+  } else {
+    console.log('  (skipped on Windows — direct shebang execution does not apply)');
+  }
+
+  // 25. A config file that fails to parse must fail clearly, not crash raw.
+  {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a11y-gate-badconfig-'));
+    fs.writeFileSync(path.join(tmpDir, 'a11y.config.json'), '{ this is not valid json');
+    const result = await run([], tmpDir);
+    check(
+      'a malformed config file fails clearly instead of crashing raw',
+      result.status === 1 && result.stderr.includes('a11y-check: could not load config'),
+      `expected exit 1 with a clear config error, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // 26. If Chromium fails to launch, a server this run started must still
+  //     be killed rather than leaked as an orphaned process.
+  {
+    const port = await getFreePort();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a11y-gate-launchfail-'));
+    const serverScript = path.join(FIXTURES, 'mini-server.js');
+    writeConfig(
+      tmpDir,
+      `{
+        urls: ['http://127.0.0.1:${port}/'],
+        server: {
+          command: ${JSON.stringify(`node ${serverScript} ${port}`)},
+          url: 'http://127.0.0.1:${port}/',
+          readyTimeout: 10000,
+        },
+        failOn: 'critical',
+      }`
+    );
+    const result = await run([], tmpDir, { PUPPETEER_EXECUTABLE_PATH: '/nonexistent/chrome' });
+    check(
+      'a Chromium launch failure fails clearly rather than crashing raw',
+      result.status === 1 && result.stderr.includes('a11y-check: could not launch Chromium'),
+      `expected exit 1 with a clear launch error, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+    const stillUp = await new Promise((resolve) => {
+      const sock = net.createConnection({ port, host: '127.0.0.1' });
+      sock.once('connect', () => {
+        sock.destroy();
+        resolve(true);
+      });
+      sock.once('error', () => resolve(false));
+    });
+    check('the server it started is still killed even when the launch fails', !stillUp);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // 27. A page that fails to load during the real audit (not just crawl
+  //     discovery) is reported as an error and blocks the build.
+  {
+    const result = await run(['--url', 'http://127.0.0.1:1/', '--fail-on', 'critical']);
+    check(
+      'a target that fails to load is reported as an error and blocks the build',
+      result.status === 1 && result.stdout.includes('ERROR') && result.stdout.includes('could not audit'),
+      `expected exit 1 with an ERROR line, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+  }
+
+  // 28. An unwritable --json-report path should warn, not crash or mask the
+  //     real pass/fail result underneath it.
+  {
+    const tmpDir = tmpDirWith({ 'good.html': path.join(FIXTURES, 'good.html') });
+    const badReportPath = path.join(tmpDir, 'nonexistent-subdir', 'report.json');
+    const result = await run(['--dir', tmpDir, '--fail-on', 'critical', '--json-report', badReportPath]);
+    check(
+      'an unwritable JSON report path warns but does not crash or mask the real result',
+      result.status === 0 && result.stderr.includes('Could not write JSON report'),
+      `expected exit 0 with a JSON-report warning, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

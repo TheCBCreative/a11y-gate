@@ -10,13 +10,10 @@
  * configured severity threshold. Everything below that threshold is
  * printed as a warning but does not block.
  *
- * On top of axe-core's rule set, it also runs checks axe has no equivalent
- * for: focus-visibility and keyboard-trap detection (a real Tab traversal,
- * not just a name/role check), reachability of custom interactive widgets
- * (onclick/role="button" elements with no tabindex), reflow at a 320px
- * viewport (WCAG 1.4.10), and re-running the full audit after opening every
- * modal/dropdown/mobile-nav/accordion it can find, since a load-time-only
- * audit never sees content that only exists once one of those is open.
+ * It also runs checks axe has no equivalent for: focus-visibility and
+ * keyboard-trap detection, reachability of custom interactive widgets,
+ * reflow at 320px (WCAG 1.4.10), and re-auditing the page after opening
+ * every modal/dropdown/accordion it can find.
  *
  * Usage:
  *   node scripts/a11y-check.js [options]
@@ -82,15 +79,9 @@ const DEFAULT_REFLOW_HEIGHT = 900;
 const DEFAULT_MAX_INTERACTIVE_TRIGGERS = 5;
 const DEFAULT_INTERACTION_SETTLE_MS = 250;
 
-// Elements that reveal new content on demand — modals, dropdowns, mobile nav,
-// accordions. axe (and everything above) only ever sees the page as it first
-// loads, so a violation that only exists once one of these is open (a modal
-// with no focus trap, a menu panel missing text, a newly-revealed icon
-// button with no name) is invisible to a load-time-only audit. Restricted to
-// ARIA/semantic signals only (never text or class-name guessing) to keep the
-// false-positive rate low, and excludes real links (see the href filter in
-// discoverInteractiveTriggers) so this never risks following a real
-// navigation.
+// Disclosure widgets (modals, dropdowns, mobile nav, accordions) — content
+// only these reveal is invisible to a load-time-only audit. ARIA/semantic
+// signals only, never text/class guessing, to keep false positives low.
 const INTERACTIVE_TRIGGER_SELECTOR =
   '[aria-expanded="false"], [aria-haspopup]:not([aria-haspopup="false"]), summary, [data-toggle]';
 
@@ -231,10 +222,7 @@ function loadConfig(args, cwd) {
       server: null, // { command, url, readyTimeout }
       jsonReport: null,
       excludePaths: [], // substrings to skip when walking staticDirs
-      // Motion: on by default, so a page's animated entrance can never hide
-      // (or fake) a violation. Forces CSS animations/transitions to their
-      // end state, emulates prefers-reduced-motion, and waits a short
-      // settle period for JS-driven motion before auditing.
+      // On by default so an animated entrance can't hide or fake a violation.
       reducedMotion: true,
       motionSettleDelay: DEFAULT_MOTION_SETTLE_MS,
       // Crawl: discover pages by following same-origin links from one or
@@ -253,35 +241,22 @@ function loadConfig(args, cwd) {
         maxStops: DEFAULT_MAX_FOCUS_STOPS,
         impact: 'serious',
       },
-      // Custom-widget keyboard operability: flags true keyboard traps (an
-      // element that swallows Tab and never releases focus) and elements
-      // that look interactive (onclick, or an interactive ARIA role) but
-      // carry no tabindex, so a mouse user can reach them and a keyboard
-      // user structurally cannot. axe has no rule for either — it only
-      // checks names/roles, never actual reachability.
+      // Flags keyboard traps and elements that look interactive but have no
+      // tabindex, so a keyboard user can't reach them. axe has no rule for
+      // either — it only checks names/roles, never actual reachability.
       checkKeyboardOperability: true,
       keyboardOperability: { impact: 'serious' },
-      // Reflow (WCAG 1.4.10): re-audits every page at a 320px-wide viewport
-      // (the standard stand-in for "1280px design at 400% browser zoom") and
-      // flags any page that needs horizontal scrolling to read a line of
-      // text — a common failure that a fixed desktop/mobile viewport pair
-      // alone won't catch.
+      // Re-audits at a 320px viewport and flags pages needing horizontal
+      // scroll to read (WCAG 1.4.10).
       checkReflow: true,
       reflow: {
         width: DEFAULT_REFLOW_WIDTH,
         height: DEFAULT_REFLOW_HEIGHT,
         impact: 'serious',
       },
-      // Interactive-state auditing: re-runs the full axe pass after opening
-      // each disclosure widget found on the page (anything using
-      // aria-expanded/aria-haspopup, <details>, or data-toggle) — a modal,
-      // dropdown, mobile nav panel, or accordion section often has its own
-      // accessibility bugs (unlabelled close button, no focus trap, missing
-      // text) that are completely invisible to a load-time-only audit.
-      // Deliberately does NOT submit forms — safely triggering a form's own
-      // validation without risking a real network submission on a live site
-      // isn't possible in general, so that class of bug still needs a
-      // manual check (see README).
+      // Opens every disclosure widget found (aria-expanded/aria-haspopup/
+      // details/data-toggle) and re-audits what it reveals. Never submits
+      // forms — see README for why.
       checkInteractiveStates: true,
       interactiveStates: {
         maxTriggers: DEFAULT_MAX_INTERACTIVE_TRIGGERS,
@@ -610,9 +585,8 @@ async function auditFocusVisibility(page, focusConfig) {
     if (!info || info.done) break;
     if (firstKey === null) firstKey = info.key;
 
-    // Stuck on the exact same element two Tab presses in a row means Tab
-    // isn't moving focus at all — a real keyboard trap (WCAG 2.1.2), not
-    // just the end of the tab order.
+    // Stuck on the same element twice in a row = a real trap (WCAG 2.1.2),
+    // not just the end of the tab order.
     if (info.key === previousKey) {
       stuckRepeats++;
       if (stuckRepeats >= 2) {
@@ -624,8 +598,7 @@ async function auditFocusVisibility(page, focusConfig) {
     }
     previousKey = info.key;
 
-    // Cycled back to the very first stop — the tab order has legitimately
-    // wrapped around to the top of the page. That's normal, not a trap.
+    // Cycled back to the first stop — the tab order wrapped normally.
     if (i > 0 && info.key === firstKey) break;
 
     if (!info.changed) flagged.push(info.descriptor);
@@ -641,8 +614,7 @@ async function auditFocusVisibility(page, focusConfig) {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard operability — elements that look interactive but sit outside the
-// tab order entirely (axe can't know intent, so it never flags these)
+// Keyboard operability — elements that look interactive but aren't focusable
 // ---------------------------------------------------------------------------
 
 async function auditKeyboardOperability(page) {
@@ -677,9 +649,7 @@ async function auditKeyboardOperability(page) {
 }
 
 // ---------------------------------------------------------------------------
-// Reflow (WCAG 1.4.10) — does the page need horizontal scrolling to read a
-// line of text at a 320px viewport (the standard stand-in for a 1280px
-// design at 400% browser zoom)?
+// Reflow (WCAG 1.4.10) — horizontal scroll check at a 320px viewport
 // ---------------------------------------------------------------------------
 
 async function auditReflow(browser, target, config) {
@@ -746,9 +716,7 @@ async function auditReflow(browser, target, config) {
 
 // ---------------------------------------------------------------------------
 // Interactive-state auditing — re-runs axe after opening each disclosure
-// widget (modal/dropdown/mobile-nav/accordion) found on the page, since a
-// load-time-only audit never sees content that only exists once one of
-// these is open.
+// widget found on the page
 // ---------------------------------------------------------------------------
 
 async function discoverInteractiveTriggers(page, max) {
@@ -832,9 +800,8 @@ async function auditInteractionState(browser, target, viewport, config, axeSourc
       nodeCount: v.nodes.length,
     }));
   } catch (err) {
-    // A click that triggers real navigation (misidentified trigger) lands
-    // here — treat it as "nothing to report" rather than a hard failure,
-    // since the rest of the audit for this page is still valid.
+    // A misidentified trigger that navigates lands here — not a hard
+    // failure, the rest of the page's audit is still valid.
     outcome.error = null;
   } finally {
     await page.close();
@@ -860,10 +827,7 @@ async function auditTargetAtViewport(browser, target, viewport, config, axeSourc
     await page.goto(target.target, { waitUntil: 'networkidle0', timeout: config.timeout });
 
     if (config.reducedMotion) {
-      // Belt-and-suspenders: force CSS animations/transitions to their end
-      // state (covers sites that never look at prefers-reduced-motion),
-      // then give JS-driven motion (rAF loops, timers) a short moment to
-      // reach its final state too.
+      // Belt-and-suspenders for sites that ignore prefers-reduced-motion.
       await page.addStyleTag({ content: MOTION_SETTLE_CSS });
       if (config.motionSettleDelay > 0) {
         await new Promise((r) => setTimeout(r, config.motionSettleDelay));
@@ -874,9 +838,8 @@ async function auditTargetAtViewport(browser, target, viewport, config, axeSourc
 
     const ruleOverrides = {};
     for (const ruleId of config.ignoreRules) ruleOverrides[ruleId] = { enabled: false };
-    // Viewport-specific rules (e.g. target-size on the mobile pass) force-
-    // enable regardless of `tags`/`ignoreRules` — this is how a rule that's
-    // off by default in axe-core gets turned on for one viewport only.
+    // Viewport-specific rules (e.g. target-size on mobile) force-enable
+    // regardless of tags/ignoreRules.
     for (const ruleId of extraRules || []) ruleOverrides[ruleId] = { enabled: true };
 
     const axeOptions = { rules: ruleOverrides };
@@ -1114,11 +1077,8 @@ async function main() {
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
-      // Interactive-state auditing opens a fresh page per trigger and waits
-      // for networkidle0 on each one — Chrome's own background pings
-      // (update checks, safe-browsing, sync) can keep that from ever going
-      // idle, silently stretching every run. None of this is needed for a
-      // headless audit, so it's turned off at the source.
+      // Chrome's own background pings can stretch networkidle0 waits —
+      // none of this is needed for a headless audit.
       '--disable-background-networking',
       '--disable-component-update',
       '--disable-domain-reliability',
@@ -1177,9 +1137,8 @@ async function main() {
     )
   );
 
-  // Every (target, viewport) pair is its own job so viewports for different
-  // pages can run in parallel, rather than one page blocking through all of
-  // its own viewports before the next page starts.
+  // Each (target, viewport) pair is its own job, so viewports for different
+  // pages can run in parallel.
   const jobs = [];
   for (const target of targets) {
     for (const viewport of config.viewports) {
