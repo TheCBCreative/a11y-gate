@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Reflow Overflow Fixture</title>
+</head>
+<body>
+  <header>
+    <h1>Fixed-width layout</h1>
+  </header>
+  <main>
+    <p>Some perfectly fine, high-contrast text.</p>
+    <!-- Fixed pixel width, wider than a 320px viewport, with nothing to
+         let it shrink — this forces horizontal scrolling at 320px, which
+         WCAG 1.4.10 (Reflow) says a page must never require. -->
+    <div style="width: 900px; height: 40px; background: #333; color: #fff;">Fixed 900px wide block</div>
+  </main>
+</body>
+</html>

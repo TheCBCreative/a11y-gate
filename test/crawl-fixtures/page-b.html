@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Crawl Fixture — Page B</title></head>
+<body>
+  <header><h1>Page B</h1></header>
+  <main>
+    <!-- Deliberately missing alt text — this is two hops deep from the
+         seed URL and never appears in any config `urls` list, so only a
+         real crawl (not a hand-maintained URL list) will ever catch it. -->
+    <img src="logo.png">
+    <a href="/page-a.html">Back to page A</a>
+  </main>
+</body>
+</html>

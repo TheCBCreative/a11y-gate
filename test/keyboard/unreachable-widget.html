@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Unreachable Widget Fixture</title>
+</head>
+<body>
+  <header>
+    <h1>Custom widget</h1>
+  </header>
+  <main>
+    <p>Some perfectly fine, high-contrast text.</p>
+    <!-- Looks and acts like a button (role, onclick handler) but tabindex="-1"
+         removes it from the tab order — a mouse user can activate it, a
+         keyboard user structurally cannot (WCAG 2.1.1). -->
+    <div role="button" tabindex="-1" aria-label="Delete item" onclick="this.dataset.clicked = '1'">Delete</div>
+  </main>
+</body>
+</html>

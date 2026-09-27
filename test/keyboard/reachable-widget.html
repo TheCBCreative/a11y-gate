@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Reachable Widget Fixture</title>
+</head>
+<body>
+  <header>
+    <h1>Custom widget</h1>
+  </header>
+  <main>
+    <p>Some perfectly fine, high-contrast text.</p>
+    <!-- Same custom "button" pattern, but tabindex="0" keeps it in the tab
+         order — this must NOT be flagged. -->
+    <div role="button" tabindex="0" aria-label="Delete item" onclick="this.dataset.clicked = '1'">Delete</div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Keyboard Trap Fixture</title>
+</head>
+<body>
+  <header>
+    <h1>Trap test</h1>
+  </header>
+  <main>
+    <a href="#main">Before</a>
+    <!-- A broken custom widget that swallows Tab entirely, so focus can
+         never move past it — a real keyboard trap (WCAG 2.1.2). -->
+    <div id="trap" tabindex="0">Focus stays here</div>
+    <a href="#after">After</a>
+  </main>
+  <script>
+    document.getElementById('trap').addEventListener('keydown', function (e) {
+      if (e.key === 'Tab') e.preventDefault();
+    });
+  </script>
+</body>
+</html>
