@@ -6,10 +6,11 @@
 
 A drop-in accessibility gate for any project's build pipeline. It runs [axe-core](https://github.com/dequelabs/axe-core)
 against real rendered pages — a live server (optionally crawled page-by-page automatically), or static
-HTML output — at both a desktop and a mobile viewport, plus a keyboard focus-visibility check axe-core
-doesn't have, and fails the build (non-zero exit code) when it finds **critical** issues. Everything less
-severe (serious/moderate/minor) is printed as a warning but does not block, so teams can adopt it without
-a wall of pre-existing issues stopping every build on day one.
+HTML output — at both a desktop and a mobile viewport, inside every modal/dropdown/accordion it can find,
+and at a 320px reflow viewport. On top of axe it adds keyboard checks axe has no equivalent for (focus
+visibility, keyboard traps, unreachable custom widgets), then fails the build (non-zero exit code) when it
+finds **critical** issues. Everything less severe (serious/moderate/minor) is printed as a warning but does
+not block, so teams can adopt it without a wall of pre-existing issues stopping every build on day one.
 
 ## Why
 
@@ -98,17 +99,45 @@ this one included — can automatically verify "meets all accessibility." Here's
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | Color contrast is good                     | axe's `color-contrast` rule (WCAG 1.4.3), run on the page in its fully settled state (see [Motion](#motion) below) |
 | Alt text is present where it's needed      | axe's `image-alt`, `input-image-alt`, `area-alt`, `role-img-alt`, `svg-img-alt`, `object-alt` rules                |
-| Links/hovers are accessible                | axe's `link-name` (discernible link text) **plus** custom focus-visibility, keyboard-trap, and keyboard-operability checks (below) — hover-triggered content that must persist on hover/focus (WCAG 1.4.13, e.g. custom tooltips) isn't automatable and still needs a manual check |
+| Links/hovers are accessible                | axe's `link-name` (discernible link text) **plus** custom focus-visibility, keyboard-trap, and keyboard-operability checks (below) — hover/focus-persistent content (WCAG 1.4.13) still needs a manual check, see below |
 | Screen readers can read it                 | axe's ARIA/semantics rule family — `aria-*`, `label`, `document-title`, `html-has-lang`, `landmark-*`, `heading-order`, `page-has-heading-one`, `region`, `bypass`, `duplicate-id`, and more (roughly 40 of axe's rules, all on by default) — this checks the structure a screen reader relies on (including heading order and landmark regions), not what one actually announces; a real pass with VoiceOver/NVDA/JAWS is still the only way to be fully sure |
 | Every rendered page, regardless of motion  | `crawl` (web apps) / `staticDirs` (static builds) for full-site coverage, plus forced motion-settling so a page mid-animation never hides or fakes a result (see below) |
 | Works on mobile as well as desktop         | Every page is audited at both a desktop and a mobile viewport by default, and the mobile pass also turns on axe's `target-size` rule (touch target size) — see [Viewports](#viewports) below |
 | Content behind menus/modals/accordions     | [Interactive-state auditing](#interactive-states) re-runs the full audit after opening every disclosure widget it can find, since axe otherwise only ever sees the page as it first loads |
 | No horizontal scrolling when zoomed        | The [reflow check](#reflow) re-audits every page at a 320px viewport (WCAG 1.4.10) |
-| Meets all accessibility                    | No automated tool can promise this. Deque (axe-core's maintainer) estimates automated tools catch roughly 30–50% of WCAG issues; the checks on this page push a11y-gate's coverage well past that baseline, but things that remain inherently manual-only: whether alt text is *accurate* (not just present), whether a custom control actually *does* the right thing when activated by keyboard (only that it's *reachable* — see [Keyboard operability](#keyboard-operability)), safely testing form-validation states (a11y-gate deliberately never submits real forms — see below), consistent navigation, helpful error messages, appropriate reading level, and anything about actual screen-reader UX rather than DOM structure. |
+| Meets all accessibility                    | No automated tool can promise this — see [What still needs a manual check](#what-still-needs-a-manual-check) below |
 
 By default (`tags: null`) axe-core runs its full rule set — everything except rules it marks
 experimental/deprecated — which is broader than WCAG 2.1 A/AA alone (it also includes axe's best-practice
 rules, Section 508, and EN 301 549). Narrow this with `tags` if you only want a stricter WCAG subset.
+
+## What still needs a manual check
+
+Deque (axe-core's maintainer) estimates automated tools catch roughly 30–50% of WCAG issues on their own.
+Everything on this page pushes a11y-gate well past that baseline, but a passing run is not a certification —
+these still need a human, and no amount of additional automation changes that:
+
+- **Alt text quality.** a11y-gate confirms alt text is *present*; whether it's *accurate* and actually
+  useful ("photo of a golden retriever" vs. "image1.jpg") is a judgment call no tool can make.
+- **Whether a keyboard-reachable control actually works.** [Keyboard operability](#keyboard-operability)
+  confirms a custom widget is *reachable* by keyboard — it can't confirm that pressing Enter or Space on it
+  does the right thing once focused.
+- **Form validation states.** [Interactive-state auditing](#interactive-states) deliberately never submits
+  forms, since there's no safe way to trigger validation without risking a real network submission. Whether
+  error messages are announced and correctly associated with their field still needs a manual pass.
+- **Real screen-reader UX.** The ARIA/semantics checks confirm the structure a screen reader relies on is
+  valid — not that the page actually makes sense read aloud in order. Run it with VoiceOver, NVDA, or JAWS
+  before calling it done.
+- **Color as the only signal (WCAG 1.4.1).** `color-contrast` checks contrast ratios, not whether color is
+  the *only* way information is conveyed (e.g. a required field marked only in red).
+- **Hover/focus-persistent content (WCAG 1.4.13).** Custom tooltips and similar hover-triggered content that
+  must stay visible on hover/focus aren't automatable.
+- **Captions and transcripts** for video/audio content.
+- **Consistent navigation, helpful error messages, and appropriate reading level** across the site.
+- **Time limits and session timeouts** having an accessible accommodation (extend, disable, adjust).
+
+None of this is a gap to "fix" with more code — it's the honest line between what automation can verify and
+what needs a person.
 
 ### Motion
 
