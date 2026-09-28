@@ -133,7 +133,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 3. No config file, no build output dir present -> should skip, not fail
@@ -145,7 +150,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 4. Motion settling is ON by default — a page fading in must be audited
@@ -196,7 +206,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 7. Focus-visibility: a link/button with its outline removed and no
@@ -209,7 +224,12 @@ async function main() {
       result.status === 1 && result.stdout.includes('focus-visible-indicator'),
       `expected exit 1 with focus-visible-indicator, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 8. Focus-visibility: a page that keeps the browser's default outline
@@ -222,7 +242,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 9. --no-focus-check turns the whole check off.
@@ -234,7 +259,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 9b. Every page is audited at both a desktop and a mobile viewport by
@@ -247,7 +277,12 @@ async function main() {
       result.stdout.includes('2 viewport(s) (desktop, mobile)'),
       result.stdout
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 9c. The mobile pass turns on axe's target-size rule (off by default),
@@ -261,7 +296,12 @@ async function main() {
       result.status === 1 && result.stdout.includes('target-size') && result.stdout.includes('(mobile)'),
       `expected exit 1 with a (mobile) target-size violation, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 9d. --no-mobile skips the mobile pass entirely, so target-size (which
@@ -274,7 +314,12 @@ async function main() {
       result.status === 0 && result.stdout.includes('1 viewport(s) (desktop)'),
       `expected exit 0 auditing only desktop, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 9e. --no-desktop mirrors --no-mobile for the other default viewport.
@@ -286,7 +331,12 @@ async function main() {
       result.status === 0 && result.stdout.includes('1 viewport(s) (mobile)'),
       `expected exit 0 auditing only mobile, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 10. Crawl: discovers pages that are never listed anywhere in config —
@@ -322,7 +372,12 @@ async function main() {
       result.status === 0 && !result.stdout.includes('image-alt') && !result.stdout.includes('button-name'),
       `expected exit 0 with no image-alt/button-name, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 12. tags restricts which rules run at all (not just which ones block).
@@ -335,7 +390,12 @@ async function main() {
       result.status === 1 && !result.stdout.includes('color-contrast'),
       `expected exit 1 with no color-contrast, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 13. --json-report writes a full, parseable report.
@@ -359,7 +419,12 @@ async function main() {
         parsed.results[0].violations.length === 0,
       `parseError=${parseError}, status=${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 14. The optional `server` config starts a real process, waits for it,
@@ -400,7 +465,12 @@ async function main() {
     });
     check('the server process is stopped after the audit finishes', !stillUp);
 
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 15. Keyboard trap: a widget that swallows Tab must be flagged even
@@ -413,7 +483,12 @@ async function main() {
       result.status === 1 && result.stdout.includes('keyboard-trap'),
       `expected exit 1 with keyboard-trap, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 16. Keyboard operability: a custom "button" with tabindex="-1" looks and
@@ -426,7 +501,12 @@ async function main() {
       result.status === 1 && result.stdout.includes('keyboard-operable-custom-widget'),
       `expected exit 1 with keyboard-operable-custom-widget, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 17. The same pattern with tabindex="0" must NOT be flagged — no false
@@ -439,7 +519,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 18. --no-keyboard-check turns both of the above off.
@@ -451,7 +536,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 19. Reflow (WCAG 1.4.10): a fixed 900px-wide block forces horizontal
@@ -464,7 +554,12 @@ async function main() {
       result.status === 1 && result.stdout.includes('reflow-320'),
       `expected exit 1 with reflow-320, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 20. A fluid layout must NOT be flagged at 320px.
@@ -476,7 +571,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 21. --no-reflow turns the 320px pass off entirely.
@@ -488,7 +588,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 22. A violation only present once a dropdown is opened must still be caught.
@@ -500,7 +605,12 @@ async function main() {
       result.status === 1 && result.stdout.includes('image-alt') && result.stdout.includes('after opening'),
       `expected exit 1 with image-alt after opening the dropdown, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 23. --no-interactive-states turns that pass off, so the same page passes.
@@ -512,7 +622,12 @@ async function main() {
       result.status === 0,
       `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 24. Regression test for the executable-bit bug that shipped once
@@ -548,7 +663,12 @@ async function main() {
       result.status === 1 && result.stderr.includes('a11y-check: could not load config'),
       `expected exit 1 with a clear config error, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 26. If Chromium fails to launch, a server this run started must still
@@ -586,7 +706,12 @@ async function main() {
       sock.once('error', () => resolve(false));
     });
     check('the server it started is still killed even when the launch fails', !stillUp);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // 27. A page that fails to load during the real audit (not just crawl
@@ -611,7 +736,12 @@ async function main() {
       result.status === 0 && result.stderr.includes('Could not write JSON report'),
       `expected exit 0 with a JSON-report warning, got ${result.status}\n${result.stdout}\n${result.stderr}`
     );
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-killed process (or antivirus
+    // scanning a just-written temp file) can hold the directory a beat
+    // longer than the kill call itself takes to return — a bare rmSync can
+    // hit EBUSY/ENOTEMPTY in that window. Retrying briefly is the documented
+    // way around it and is a no-op everywhere else.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   console.log('');

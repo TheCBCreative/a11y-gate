@@ -538,7 +538,14 @@ function stopServer(child) {
     if (process.platform !== 'win32') {
       process.kill(-child.pid, 'SIGTERM'); // kill whole process group
     } else {
-      child.kill();
+      // child.kill() here only terminates the cmd.exe wrapper that `shell:
+      // true` spawns — the actual server process it launched (e.g. `node
+      // some-script.js`) is cmd.exe's own child, not ours, and survives.
+      // It keeps the port open and holds a lock on its cwd, so anything
+      // that expects the server to actually be gone (a rerun on the same
+      // port, cleanup of a temp directory used as its cwd) can fail right
+      // after this returns. taskkill's /T walks the whole process tree.
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
     }
   } catch {
     // already dead — fine
