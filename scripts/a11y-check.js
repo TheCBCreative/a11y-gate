@@ -558,23 +558,40 @@ function startServer(serverConfig, cwd) {
 }
 
 function stopServer(child) {
-  if (!child || child.killed) return;
-  try {
-    if (process.platform !== 'win32') {
-      process.kill(-child.pid, 'SIGTERM'); // kill whole process group
-    } else {
-      // child.kill() here only terminates the cmd.exe wrapper that `shell:
-      // true` spawns — the actual server process it launched (e.g. `node
-      // some-script.js`) is cmd.exe's own child, not ours, and survives.
-      // It keeps the port open and holds a lock on its cwd, so anything
-      // that expects the server to actually be gone (a rerun on the same
-      // port, cleanup of a temp directory used as its cwd) can fail right
-      // after this returns. taskkill's /T walks the whole process tree.
-      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  if (!child || child.killed) return Promise.resolve();
+  return new Promise((resolve) => {
+    try {
+      if (process.platform !== 'win32') {
+        process.kill(-child.pid, 'SIGTERM'); // kill whole process group
+        resolve();
+      } else {
+        // child.kill() here only terminates the cmd.exe wrapper that `shell:
+        // true` spawns — the actual server process it launched (e.g. `node
+        // some-script.js`) is cmd.exe's own child, not ours, and survives.
+        // It keeps the port open and holds a lock on its cwd, so anything
+        // that expects the server to actually be gone (a rerun on the same
+        // port, cleanup of a temp directory used as its cwd) can fail right
+        // after this returns. taskkill's /T walks the whole process tree.
+        //
+        // taskkill is itself just spawned, not awaited — without waiting for
+        // it to exit, a caller that immediately deletes the server's cwd
+        // (as the self-tests do for their temp fixture directories) can run
+        // before taskkill has even started killing the tree, not just
+        // before the OS has released the file handles. That race, not a
+        // merely-slow release, was the actual cause of the intermittent
+        // Windows CI EBUSY/ENOTEMPTY failures the rmSync retries alone
+        // couldn't fully cover.
+        const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+          stdio: 'ignore',
+        });
+        killer.on('exit', () => resolve());
+        killer.on('error', () => resolve());
+      }
+    } catch {
+      // already dead — fine
+      resolve();
     }
-  } catch {
-    // already dead — fine
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1182,7 +1199,7 @@ async function main() {
           }ms.`
         )
       );
-      stopServer(serverProcess);
+      await stopServer(serverProcess);
       process.exit(1);
     }
     console.log(c.green(`Server ready at ${config.server.url}`));
@@ -1198,7 +1215,7 @@ async function main() {
           '  npm install --save-dev puppeteer axe-core'
       )
     );
-    stopServer(serverProcess);
+    await stopServer(serverProcess);
     process.exit(1);
   }
 
@@ -1222,7 +1239,7 @@ async function main() {
     });
   } catch (err) {
     console.error(c.red(`a11y-check: could not launch Chromium: ${err.message}`));
-    stopServer(serverProcess);
+    await stopServer(serverProcess);
     process.exit(1);
   }
 
@@ -1244,14 +1261,14 @@ async function main() {
     }
   } catch (err) {
     await browser.close();
-    stopServer(serverProcess);
+    await stopServer(serverProcess);
     console.error(c.red(`a11y-check: crawl failed: ${err.message}`));
     process.exit(1);
   }
 
   if (targets.length === 0) {
     await browser.close();
-    stopServer(serverProcess);
+    await stopServer(serverProcess);
     console.error(
       c.red(
         'a11y-check: config was found but resolved to zero pages to audit. ' +
@@ -1325,7 +1342,7 @@ async function main() {
     }));
   } finally {
     await browser.close();
-    stopServer(serverProcess);
+    await stopServer(serverProcess);
   }
 
   const { blockingCount, erroredTargets } = printReport(results, config);
