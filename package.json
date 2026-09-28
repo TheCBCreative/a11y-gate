@@ -1,6 +1,6 @@
 {
   "name": "a11y-gate",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Drop-in accessibility gate for CI/CD — crawls or scans every page (desktop, mobile, and reflow viewports), opens every modal/dropdown/accordion it can find, runs axe-core plus keyboard-trap/focus-visibility/operability checks, and fails the build on critical violations.",
   "main": "scripts/a11y-check.js",
   "bin": {

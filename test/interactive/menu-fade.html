@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Menu Fade-In Fixture</title>
+</head>
+<body>
+  <header>
+    <h1>Page with a menu that fades in on open</h1>
+  </header>
+  <main>
+    <p>Some perfectly fine, high-contrast text.</p>
+    <button type="button" id="toggle" aria-expanded="false" aria-controls="menu">Menu</button>
+    <!-- Hidden at load, like the plain dropdown fixture — a load-time-only
+         audit never sees it. The difference from that fixture is what
+         happens the instant it's revealed: these links don't just appear,
+         they fade in via the Web Animations API, so a check that settles
+         animations only once, before the click, can still sample them
+         mid-fade at low contrast. -->
+    <!-- display:block + padding keeps these a large enough touch target
+         (WCAG 2.5.8) that the mobile viewport pass doesn't flag them for a
+         reason unrelated to what this fixture is actually testing. -->
+    <ul id="menu" hidden>
+      <li><a href="#one" id="link-one" style="color: #333; display: block; padding: 14px 16px;">01 One</a></li>
+      <li><a href="#two" id="link-two" style="color: #333; display: block; padding: 14px 16px;">02 Two</a></li>
+    </ul>
+  </main>
+  <script>
+    document.getElementById('toggle').addEventListener('click', function () {
+      var expanded = this.getAttribute('aria-expanded') === 'true';
+      this.setAttribute('aria-expanded', String(!expanded));
+      if (expanded) return;
+      var menu = document.getElementById('menu');
+      menu.hidden = false;
+      // Mirrors a real Motion/Framer Motion staggered menu reveal: each
+      // link fades in via the Web Animations API, not CSS, with a long
+      // duration so a check that doesn't settle post-click animations
+      // would sample it mid-fade at low contrast.
+      ['link-one', 'link-two'].forEach(function (id) {
+        document.getElementById(id).animate(
+          [{ opacity: 0.15 }, { opacity: 1 }],
+          { duration: 60000, fill: 'both' }
+        );
+      });
+    });
+  </script>
+</body>
+</html>

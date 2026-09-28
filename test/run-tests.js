@@ -630,6 +630,21 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
+  // 23b. Regression test: opening a trigger can start its own animations
+  //      (a menu's items fading in), not just reveal already-settled
+  //      content — those need settling too, not just the fixed post-click
+  //      delay, or a check can sample them mid-fade as low contrast.
+  {
+    const tmpDir = tmpDirWith({ 'menu-fade.html': path.join(INTERACTIVE_FIXTURES, 'menu-fade.html') });
+    const result = await run(['--dir', tmpDir, '--fail-on', 'serious']);
+    check(
+      'settles animations a click itself starts, not just ones already running at load',
+      result.status === 0,
+      `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
   // 24. Regression test for the executable-bit bug that shipped once
   //     already: npm's POSIX bin shim invokes this file directly (not via
   //     `node`), so it must stay executable and its shebang must work.

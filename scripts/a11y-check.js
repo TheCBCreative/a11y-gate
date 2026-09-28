@@ -821,6 +821,16 @@ async function auditInteractionState(browser, target, viewport, config, axeSourc
     );
     if (!clicked) return outcome;
 
+    // settleWebAnimations() above only caught animations already running at
+    // load time. Opening this trigger can start its own — a menu's items
+    // fading/sliding in, an accordion panel expanding — so it needs the same
+    // treatment, not just the fixed delay below (which was doing double
+    // duty as an animation wait even though it's really meant for the
+    // DOM/layout to settle after the click).
+    if (config.reducedMotion) {
+      await settleWebAnimations(page);
+    }
+
     const settle = config.interactiveStates.settleDelay || DEFAULT_INTERACTION_SETTLE_MS;
     await new Promise((r) => setTimeout(r, settle));
 
