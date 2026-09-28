@@ -183,6 +183,22 @@ async function main() {
     );
   }
 
+  // 6b. Motion settling must also catch animations run through the Web
+  //     Animations API directly (Element.animate()) — how libraries like
+  //     Motion/Framer Motion animate — not just CSS animations/transitions.
+  //     Regression test for the false-contrast-failure bug where only CSS
+  //     animations were force-settled.
+  {
+    const tmpDir = tmpDirWith({ 'waapi.html': path.join(__dirname, 'motion', 'waapi-animated.html') });
+    const result = await run(['--dir', tmpDir, '--fail-on', 'serious']);
+    check(
+      'settles a Web Animations API (non-CSS) fade-in by default',
+      result.status === 0,
+      `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
   // 7. Focus-visibility: a link/button with its outline removed and no
   //    replacement must be flagged even though axe-core has no rule for it.
   {

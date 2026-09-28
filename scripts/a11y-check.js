@@ -118,6 +118,41 @@ const MOTION_SETTLE_CSS = `
   }
 `;
 
+// CSS animations/transitions are covered by MOTION_SETTLE_CSS above, but a
+// growing share of sites (anything using Motion/Framer Motion, GSAP's WAAPI
+// backend, or a hand-rolled Web Animations API call) animate outside CSS
+// entirely, so the stylesheet override never touches them. The Web
+// Animations API exposes every running animation via document.getAnimations,
+// CSS-driven or not, so jumping each one to its end state settles both kinds
+// the same way. Finishing an animation can itself trigger a chained one (a
+// staggered list revealing its next item, for example), so this sweeps a
+// few times until nothing new shows up.
+async function settleWebAnimations(page) {
+  await page.evaluate(() => {
+    function finishAll() {
+      const anims = document.getAnimations({ subtree: true });
+      for (const anim of anims) {
+        try {
+          anim.finish();
+        } catch {
+          try {
+            anim.cancel();
+          } catch {
+            // nothing more we can do with this one — leave it running
+          }
+        }
+      }
+      return anims.length;
+    }
+    // A handful of passes is enough to drain any chained/staggered
+    // animations without risking an infinite loop on a page that
+    // continuously re-triggers its own animations.
+    for (let i = 0; i < 5; i++) {
+      if (finishAll() === 0) break;
+    }
+  });
+}
+
 const COLOR_ENABLED = process.stdout.isTTY && !process.argv.includes('--no-color') && !process.env.NO_COLOR;
 
 function color(code, str) {
@@ -667,6 +702,7 @@ async function auditReflow(browser, target, config) {
 
     if (config.reducedMotion) {
       await page.addStyleTag({ content: MOTION_SETTLE_CSS });
+      await settleWebAnimations(page);
       if (config.motionSettleDelay > 0) {
         await new Promise((r) => setTimeout(r, config.motionSettleDelay));
       }
@@ -759,6 +795,7 @@ async function auditInteractionState(browser, target, viewport, config, axeSourc
     await page.goto(target.target, { waitUntil: 'networkidle0', timeout: config.timeout });
     if (config.reducedMotion) {
       await page.addStyleTag({ content: MOTION_SETTLE_CSS });
+      await settleWebAnimations(page);
       if (config.motionSettleDelay > 0) {
         await new Promise((r) => setTimeout(r, config.motionSettleDelay));
       }
@@ -829,6 +866,7 @@ async function auditTargetAtViewport(browser, target, viewport, config, axeSourc
     if (config.reducedMotion) {
       // Belt-and-suspenders for sites that ignore prefers-reduced-motion.
       await page.addStyleTag({ content: MOTION_SETTLE_CSS });
+      await settleWebAnimations(page);
       if (config.motionSettleDelay > 0) {
         await new Promise((r) => setTimeout(r, config.motionSettleDelay));
       }

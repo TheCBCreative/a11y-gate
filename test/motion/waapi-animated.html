@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WAAPI-animated Fixture</title>
+  <style>
+    /* Deliberately no @keyframes/animation/transition CSS properties here —
+       this fixture is only realistic if MOTION_SETTLE_CSS's CSS overrides
+       have nothing to grab onto, the way a real Motion/Framer Motion fade-in
+       looks to the browser. */
+    .fade { color: #333; opacity: 0.15; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Hello</h1>
+    <p class="fade" id="target">This text fades in slowly via the Web Animations API (the same
+      mechanism libraries like Motion use), not CSS — but is high contrast once it settles.</p>
+  </main>
+  <script>
+    // Mirrors how Motion/Framer Motion animate: a direct Element.animate()
+    // call, not a CSS animation/transition. A long duration so a load-time
+    // check that doesn't specifically settle WAAPI animations would sample
+    // it mid-fade, at low contrast.
+    document.getElementById('target').animate(
+      [{ opacity: 0.15 }, { opacity: 1 }],
+      { duration: 60000, fill: 'both' }
+    );
+  </script>
+</body>
+</html>
