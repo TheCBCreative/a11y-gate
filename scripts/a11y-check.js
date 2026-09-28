@@ -38,6 +38,7 @@
  *   --no-interactive-states  Skip re-auditing pages after opening menus/modals/etc
  *   --max-triggers <n>     Cap on interactive elements opened per page (default: 5)
  *   --json-report <path>   Write a full JSON report to this path
+ *   --no-progress          Disable the progress bar/milestone output
  *   --no-color             Disable colored output
  *   --help                 Show this help text
  *
@@ -202,6 +203,7 @@ function parseArgs(argv) {
     else if (a === '--no-reflow') args.checkReflow = false;
     else if (a === '--no-interactive-states') args.checkInteractiveStates = false;
     else if (a === '--max-triggers') args.maxTriggers = Number(argv[++i]);
+    else if (a === '--no-progress') args.showProgress = false;
     else if (a === '--no-color') {
       /* handled above */
     } else if (a.startsWith('-')) {
@@ -297,6 +299,9 @@ function loadConfig(args, cwd) {
         maxTriggers: DEFAULT_MAX_INTERACTIVE_TRIGGERS,
         settleDelay: DEFAULT_INTERACTION_SETTLE_MS,
       },
+      // A run with several pages, or a page with several disclosure
+      // widgets, can go a long time with no output otherwise.
+      showProgress: true,
     },
     fileConfig
   );
@@ -345,6 +350,7 @@ function loadConfig(args, cwd) {
   if (args.checkKeyboardOperability !== undefined) config.checkKeyboardOperability = args.checkKeyboardOperability;
   if (args.checkReflow !== undefined) config.checkReflow = args.checkReflow;
   if (args.checkInteractiveStates !== undefined) config.checkInteractiveStates = args.checkInteractiveStates;
+  if (args.showProgress !== undefined) config.showProgress = args.showProgress;
   if (args.maxTriggers) config.interactiveStates.maxTriggers = args.maxTriggers;
   if (args.skipMobile) config.viewports = config.viewports.filter((vp) => vp.name !== 'mobile');
   if (args.skipDesktop) config.viewports = config.viewports.filter((vp) => vp.name !== 'desktop');
@@ -457,11 +463,28 @@ async function crawlSite(browser, config) {
   const queue = seeds.map((url) => ({ url, depth: 0 }));
   const discovered = [];
 
+  // The crawl's own final page count isn't known until it's done, so this
+  // can't be a completed/total bar like the audit and reflow passes — it's
+  // liveness only: how many pages found so far, and how many are still
+  // queued to check. Same TTY-vs-log-file split as makeProgressReporter.
+  const isTTY = Boolean(process.stdout.isTTY);
+  let lastCrawlLogAt = 0;
+
   while (queue.length && discovered.length < maxPages) {
     const { url, depth } = queue.shift();
     if (visited.has(url)) continue;
     visited.add(url);
     discovered.push(url);
+
+    if (config.showProgress) {
+      if (isTTY) {
+        const line = `  Crawling... ${discovered.length} page(s) found, ${queue.length} queued`;
+        process.stdout.write('\r' + c.cyan(line.padEnd(60)));
+      } else if (discovered.length - lastCrawlLogAt >= 10) {
+        lastCrawlLogAt = discovered.length;
+        console.log(c.cyan(`  Crawling... ${discovered.length} page(s) found so far, ${queue.length} queued`));
+      }
+    }
 
     if (depth >= maxDepth) continue;
 
@@ -492,6 +515,8 @@ async function crawlSite(browser, config) {
       await page.close();
     }
   }
+
+  if (config.showProgress && isTTY && discovered.length > 0) process.stdout.write('\n');
 
   if (discovered.length >= maxPages && queue.length) {
     console.warn(
@@ -974,18 +999,62 @@ async function auditTargetAtViewport(browser, target, viewport, config, axeSourc
   return outcome;
 }
 
-async function runWithConcurrency(items, limit, worker) {
+async function runWithConcurrency(items, limit, worker, onProgress) {
   const results = new Array(items.length);
   let next = 0;
   async function runOne() {
     while (next < items.length) {
       const i = next++;
       results[i] = await worker(items[i], i);
+      if (onProgress) onProgress();
     }
   }
   const workers = Array.from({ length: Math.min(limit, items.length) }, runOne);
   await Promise.all(workers);
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Progress reporting — a page with several accordions/menus, or a crawl of
+// dozens of pages, can run for a long time with axe/puppeteer producing no
+// output of their own. Without something here, that silence is easy to
+// mistake for a hang. In a real terminal this redraws a single line so it
+// doesn't flood the scrollback; piped to a file or a CI log (no TTY) it
+// instead prints occasional milestone lines, since redrawing with \r just
+// leaves control characters in a log file.
+// ---------------------------------------------------------------------------
+
+function renderProgressBar(completed, total, width) {
+  const ratio = total === 0 ? 1 : Math.min(1, completed / total);
+  const filled = Math.round(ratio * width);
+  const bar = '#'.repeat(filled) + '-'.repeat(width - filled);
+  return `[${bar}] ${completed}/${total} (${Math.round(ratio * 100)}%)`;
+}
+
+function makeProgressReporter(total, label, config) {
+  if (!config.showProgress || total === 0) return () => {};
+  const isTTY = Boolean(process.stdout.isTTY);
+  let completed = 0;
+  let lastMilestone = -1;
+
+  return function tick() {
+    completed++;
+    if (isTTY) {
+      const line = `  ${label} ${renderProgressBar(completed, total, 24)}`;
+      // Padding covers a shorter line overwriting a longer one from the
+      // same phase (label/total are fixed per phase, but the bar's digit
+      // width can still grow, e.g. 9/10 -> 10/10).
+      process.stdout.write('\r' + c.cyan(line.padEnd(60)));
+      if (completed === total) process.stdout.write('\n');
+    } else {
+      const percent = Math.floor((completed / total) * 100);
+      const milestone = Math.floor(percent / 20) * 20; // roughly every 20%
+      if (milestone > lastMilestone || completed === total) {
+        lastMilestone = milestone;
+        console.log(c.cyan(`  ${label}: ${completed}/${total} (${percent}%)`));
+      }
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,8 +1285,11 @@ async function main() {
 
   let results;
   try {
-    const jobOutcomes = await runWithConcurrency(jobs, config.concurrency, (job) =>
-      auditTargetAtViewport(browser, job.target, job.viewport, config, axeSource)
+    const jobOutcomes = await runWithConcurrency(
+      jobs,
+      config.concurrency,
+      (job) => auditTargetAtViewport(browser, job.target, job.viewport, config, axeSource),
+      makeProgressReporter(jobs.length, 'Auditing', config)
     );
 
     const byLabel = new Map();
@@ -1232,8 +1304,11 @@ async function main() {
     });
 
     if (config.checkReflow) {
-      const reflowOutcomes = await runWithConcurrency(targets, config.concurrency, (target) =>
-        auditReflow(browser, target, config)
+      const reflowOutcomes = await runWithConcurrency(
+        targets,
+        config.concurrency,
+        (target) => auditReflow(browser, target, config),
+        makeProgressReporter(targets.length, 'Checking reflow', config)
       );
       reflowOutcomes.forEach((outcome, i) => {
         const bucket = byLabel.get(targets[i].label);
