@@ -1044,7 +1044,13 @@ async function main() {
     process.exit(0);
   }
 
-  const { config, hadConfigFile } = loadConfig(args, cwd);
+  let config, hadConfigFile;
+  try {
+    ({ config, hadConfigFile } = loadConfig(args, cwd));
+  } catch (err) {
+    console.error(c.red(`a11y-check: could not load config: ${err.message}`));
+    process.exit(1);
+  }
 
   const nothingToDo =
     !hadConfigFile &&
@@ -1110,22 +1116,29 @@ async function main() {
     process.exit(1);
   }
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      // Chrome's own background pings can stretch networkidle0 waits —
-      // none of this is needed for a headless audit.
-      '--disable-background-networking',
-      '--disable-component-update',
-      '--disable-domain-reliability',
-      '--disable-sync',
-      '--disable-default-apps',
-      '--no-first-run',
-      '--metrics-recording-only',
-    ],
-  });
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        // Chrome's own background pings can stretch networkidle0 waits —
+        // none of this is needed for a headless audit.
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-domain-reliability',
+        '--disable-sync',
+        '--disable-default-apps',
+        '--no-first-run',
+        '--metrics-recording-only',
+      ],
+    });
+  } catch (err) {
+    console.error(c.red(`a11y-check: could not launch Chromium: ${err.message}`));
+    stopServer(serverProcess);
+    process.exit(1);
+  }
 
   let targets;
   try {
@@ -1227,8 +1240,15 @@ async function main() {
 
   if (config.jsonReport) {
     const reportPath = path.resolve(cwd, config.jsonReport);
-    fs.writeFileSync(reportPath, JSON.stringify({ config, results }, null, 2));
-    console.log(`\nFull JSON report written to ${reportPath}`);
+    try {
+      fs.writeFileSync(reportPath, JSON.stringify({ config, results }, null, 2));
+      console.log(`\nFull JSON report written to ${reportPath}`);
+    } catch (err) {
+      // A report-writing failure is a side effect, not the actual audit
+      // result — warn and keep going rather than letting it override the
+      // real pass/fail exit code below.
+      console.warn(c.yellow(`\nCould not write JSON report to ${reportPath}: ${err.message}`));
+    }
   }
 
   if (blockingCount > 0) {
