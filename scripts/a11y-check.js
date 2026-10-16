@@ -38,6 +38,9 @@
  *   --no-interactive-states  Skip re-auditing pages after opening menus/modals/etc
  *   --max-triggers <n>     Cap on interactive elements opened per page (default: 5)
  *   --json-report <path>   Write a full JSON report to this path
+ *   --no-incomplete        Don't list the findings axe-core couldn't decide on ("needs review")
+ *   --repeat <n>           Run the whole audit n times and report any finding that doesn't show up every
+ *                          time — a quick way to tell a real problem from a flaky measurement
  *   --no-progress          Disable the progress bar/milestone output
  *   --no-color             Disable colored output
  *   --help                 Show this help text
@@ -61,6 +64,7 @@
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
+const os = require('os');
 const { spawn } = require('child_process');
 
 // ---------------------------------------------------------------------------
@@ -76,6 +80,11 @@ const DEFAULT_MAX_CRAWL_PAGES = 200;
 const DEFAULT_MAX_CRAWL_DEPTH = 25;
 const DEFAULT_MOTION_SETTLE_MS = 300;
 const DEFAULT_MAX_FOCUS_STOPS = 400;
+// An element that looks unchanged on focus is re-checked this many times (after a short pause) before it's
+// reported. A real missing indicator is unchanged every time; a one-off is a style recalculation or an in-flight
+// animation caught mid-frame, which settles on the next look.
+const FOCUS_RECHECKS = 3;
+const FOCUS_RECHECK_DELAY_MS = 80;
 const DEFAULT_REFLOW_WIDTH = 320; // 1280px design ÷ 400% zoom, per WCAG 1.4.10's own worked example
 const DEFAULT_REFLOW_HEIGHT = 900;
 const DEFAULT_MAX_INTERACTIVE_TRIGGERS = 5;
@@ -205,6 +214,8 @@ function parseArgs(argv) {
     else if (a === '--no-interactive-states') args.checkInteractiveStates = false;
     else if (a === '--max-triggers') args.maxTriggers = Number(argv[++i]);
     else if (a === '--no-progress') args.showProgress = false;
+    else if (a === '--no-incomplete') args.reportIncomplete = false;
+    else if (a === '--repeat') args.repeat = Number(argv[++i]);
     else if (a === '--no-color') {
       /* handled above */
     } else if (a.startsWith('-')) {
@@ -274,6 +285,9 @@ function loadConfig(args, cwd) {
       // Keyboard focus-visibility check (tabs through every reachable
       // element and flags any with no visible focus state). This is on by
       // default because axe-core has no equivalent rule.
+      // axe-core sorts what it can't decide (often text contrast over images or video) into an "incomplete"
+      // list. Those aren't failures, but they're where real problems hide, so they're listed for a human to check.
+      reportIncomplete: true,
       checkFocusVisibility: true,
       focusVisibility: {
         maxStops: DEFAULT_MAX_FOCUS_STOPS,
@@ -352,6 +366,7 @@ function loadConfig(args, cwd) {
   if (args.checkReflow !== undefined) config.checkReflow = args.checkReflow;
   if (args.checkInteractiveStates !== undefined) config.checkInteractiveStates = args.checkInteractiveStates;
   if (args.showProgress !== undefined) config.showProgress = args.showProgress;
+  if (args.reportIncomplete !== undefined) config.reportIncomplete = args.reportIncomplete;
   if (args.maxTriggers) config.interactiveStates.maxTriggers = args.maxTriggers;
   if (args.skipMobile) config.viewports = config.viewports.filter((vp) => vp.name !== 'mobile');
   if (args.skipDesktop) config.viewports = config.viewports.filter((vp) => vp.name !== 'desktop');
@@ -534,6 +549,28 @@ async function crawlSite(browser, config) {
 // Optional local server bootstrap
 // ---------------------------------------------------------------------------
 
+// Stops the server this run started if the run is interrupted (Ctrl-C, a CI cancel) or exits any other way. Without
+// this, the server — started in its own process group — outlives the run and holds its port, so the next run
+// fails with "already in use".
+function installServerCleanup(getServer) {
+  const onSignal = (signal, code) => () => {
+    console.error(c.yellow(`\na11y-check: received ${signal} — stopping the server and exiting.`));
+    Promise.resolve(stopServer(getServer())).finally(() => process.exit(code));
+  };
+  process.once('SIGINT', onSignal('SIGINT', 130));
+  process.once('SIGTERM', onSignal('SIGTERM', 143));
+  // Last resort for any other way out (an unexpected error, process.exit): kill the server's process group.
+  process.on('exit', () => {
+    const child = getServer();
+    if (!child || child.exit || process.platform === 'win32') return;
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      // already gone
+    }
+  });
+}
+
 // Resolves true when something is already accepting connections on the
 // port in `url` (only checked for loopback URLs — a remote host's port isn't
 // ours to probe). Used before spawning the server: if the port is taken, the
@@ -649,6 +686,57 @@ function stopServer(child) {
 // Focus-visibility check (real keyboard traversal — axe has no equivalent)
 // ---------------------------------------------------------------------------
 
+// Measures whether focusing `key`'s element changes how it looks: the element itself, plus up to three ancestors,
+// because plenty of designs draw the focus ring on a wrapper (a card with `:has(:focus-visible)`, a field group with
+// `:focus-within`) while the focused control itself stays plain. Both readings are taken two animation frames after the
+// state change so pending style updates have landed, rather than the instant focus moves. The element ends up focused
+// again, as it was. Returns { gone: true } if the element left the page, otherwise { changedLevel } where -1 means
+// nothing changed, 0 the element itself, and 1+ an ancestor.
+const FOCUS_ANCESTOR_LEVELS = 4; // the element + 3 ancestors
+
+async function measureFocusChange(page, key) {
+  return page.evaluate(
+    async (elementKey, levelCount) => {
+      const el = document.querySelector(`[data-a11y-gate-key="${elementKey}"]`);
+      if (!el) return { gone: true };
+      const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const snapshot = (target) => {
+        const cs = getComputedStyle(target);
+        return [
+          cs.outlineStyle,
+          cs.outlineWidth,
+          cs.outlineColor,
+          cs.boxShadow,
+          cs.borderTopColor,
+          cs.borderTopWidth,
+          cs.backgroundColor,
+        ].join('|');
+      };
+      const readLevels = () => {
+        const out = [];
+        let node = el;
+        for (let i = 0; i < levelCount && node && node !== document.documentElement; i++) {
+          out.push(snapshot(node));
+          node = node.parentElement;
+        }
+        return out;
+      };
+
+      if (document.activeElement !== el) el.focus({ preventScroll: true });
+      await frame();
+      const focused = readLevels();
+      el.blur();
+      await frame();
+      const resting = readLevels();
+      el.focus({ preventScroll: true });
+
+      return { changedLevel: focused.findIndex((value, i) => value !== resting[i]) };
+    },
+    key,
+    FOCUS_ANCESTOR_LEVELS
+  );
+}
+
 async function auditFocusVisibility(page, focusConfig) {
   const maxStops = (focusConfig && focusConfig.maxStops) || DEFAULT_MAX_FOCUS_STOPS;
 
@@ -660,6 +748,7 @@ async function auditFocusVisibility(page, focusConfig) {
 
   const flagged = [];
   const trapped = [];
+  const rechecked = [];
   let previousKey = null;
   let firstKey = null;
   let stuckRepeats = 0;
@@ -681,23 +770,7 @@ async function auditFocusVisibility(page, focusConfig) {
           el.setAttribute('data-a11y-gate-key', key);
         }
 
-        function snapshot(target) {
-          const cs = getComputedStyle(target);
-          return [
-            cs.outlineStyle,
-            cs.outlineWidth,
-            cs.outlineColor,
-            cs.boxShadow,
-            cs.borderTopColor,
-            cs.borderTopWidth,
-            cs.backgroundColor,
-          ].join('|');
-        }
-
-        const focusedSnapshot = snapshot(el);
-        el.blur();
-        const restingSnapshot = snapshot(el);
-        el.focus({ preventScroll: true });
+        const matchedFocusVisible = el.matches(':focus-visible');
 
         const tag = el.tagName.toLowerCase();
         const idAttr = el.id ? '#' + el.id : '';
@@ -710,7 +783,7 @@ async function auditFocusVisibility(page, focusConfig) {
           done: false,
           key,
           descriptor: `${tag}${idAttr}${text ? ` "${text}"` : ''}`,
-          changed: focusedSnapshot !== restingSnapshot,
+          matchedFocusVisible,
         };
       });
     } catch {
@@ -736,7 +809,27 @@ async function auditFocusVisibility(page, focusConfig) {
     // Cycled back to the first stop — the tab order wrapped normally.
     if (i > 0 && info.key === firstKey) break;
 
-    if (!info.changed) flagged.push(info.descriptor);
+    // First look, then up to FOCUS_RECHECKS more if it came back unchanged.
+    let changed = false;
+    let firstLookChanged = false;
+    let looks = 0;
+    for (let attempt = 0; attempt <= FOCUS_RECHECKS && !changed; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, FOCUS_RECHECK_DELAY_MS));
+      try {
+        const measured = await measureFocusChange(page, info.key);
+        looks++;
+        changed = Boolean(measured.gone) || measured.changedLevel !== -1;
+        if (attempt === 0) firstLookChanged = changed;
+      } catch {
+        changed = true; // page navigated away mid-check — nothing trustworthy to flag
+      }
+    }
+    if (!changed) {
+      flagged.push(`${info.descriptor} [looked unchanged on all ${looks} checks; matched :focus-visible: ${info.matchedFocusVisible}]`);
+    } else if (!firstLookChanged) {
+      // Passed only on a recheck: not a failure, but never silent — a real flicker is worth knowing about.
+      rechecked.push(`${info.descriptor} [passed on recheck ${looks - 1}; matched :focus-visible at first look: ${info.matchedFocusVisible}]`);
+    }
   }
 
   await page
@@ -745,7 +838,7 @@ async function auditFocusVisibility(page, focusConfig) {
     })
     .catch(() => {});
 
-  return { flagged, trapped };
+  return { flagged, trapped, rechecked };
 }
 
 // ---------------------------------------------------------------------------
@@ -1005,8 +1098,20 @@ async function auditTargetAtViewport(browser, target, viewport, config, axeSourc
       nodeCount: v.nodes.length,
     }));
 
+    if (config.reportIncomplete) {
+      outcome.review = (axeResults.incomplete || []).map((v) => ({
+        id: v.id,
+        viewport: name,
+        help: v.help,
+        helpUrl: v.helpUrl,
+        nodes: v.nodes.map((n) => n.target.join(' ')).slice(0, 3),
+        nodeCount: v.nodes.length,
+      }));
+    }
+
     if (config.checkFocusVisibility) {
-      const { flagged, trapped } = await auditFocusVisibility(page, config.focusVisibility);
+      const { flagged, trapped, rechecked } = await auditFocusVisibility(page, config.focusVisibility);
+      outcome.focusRechecks = rechecked.map((descriptor) => ({ viewport: name, descriptor }));
       if (flagged.length) {
         outcome.violations.push({
           id: 'focus-visible-indicator',
@@ -1176,6 +1281,47 @@ function printReport(results, config) {
     );
   }
 
+  // Findings axe couldn't decide on — informational, never part of the pass/fail result.
+  const reviewByRule = new Map();
+  for (const r of results) {
+    for (const item of r.review || []) {
+      if (!reviewByRule.has(item.id)) reviewByRule.set(item.id, { help: item.help, pages: new Map() });
+      const pages = reviewByRule.get(item.id).pages;
+      const entry = pages.get(r.label) || { viewports: new Set(), nodeCount: 0, example: item.nodes[0] };
+      entry.viewports.add(item.viewport);
+      entry.nodeCount = Math.max(entry.nodeCount, item.nodeCount);
+      pages.set(r.label, entry);
+    }
+  }
+  if (reviewByRule.size) {
+    console.log(
+      `\n${c.yellow('?')} Needs manual review: axe-core couldn't decide on these, so they aren't counted as failures. ` +
+        'Check them by eye (use --json-report for the full list, --no-incomplete to hide):'
+    );
+    for (const [id, { help, pages }] of reviewByRule) {
+      console.log(c.yellow(`    ${id}`) + c.dim(` — ${help}`));
+      let shown = 0;
+      for (const [label, entry] of pages) {
+        if (shown++ >= 4) {
+          console.log(c.dim(`        …and ${pages.size - 4} more page(s)`));
+          break;
+        }
+        console.log(
+          c.dim(`        ${label} (${[...entry.viewports].join(', ')}): ${entry.nodeCount} element(s), e.g. ${entry.example}`)
+        );
+      }
+    }
+  }
+
+  const rechecks = results.flatMap((r) => (r.focusRechecks || []).map((x) => ({ label: r.label, ...x })));
+  if (rechecks.length) {
+    console.log(
+      `\n${c.yellow('!')} ${rechecks.length} focus indicator(s) looked unchanged on first look and passed on a recheck. ` +
+        'Not a failure, but if the same element keeps appearing, check its focus styling by hand:'
+    );
+    for (const r of rechecks) console.log(c.yellow(`    ${r.label} (${r.viewport}): ${r.descriptor}`));
+  }
+
   console.log('\n' + c.bold('Summary'));
   console.log(
     `  critical: ${counts.critical}   serious: ${counts.serious}   moderate: ${counts.moderate}   minor: ${counts.minor}   unknown: ${counts.unknown}`
@@ -1183,6 +1329,109 @@ function printReport(results, config) {
   console.log(`  fail-on threshold: ${c.bold(config.failOn)} (and anything more severe)`);
 
   return { blockingCount, erroredTargets, counts };
+}
+
+// ---------------------------------------------------------------------------
+// --repeat: run the whole audit several times and report what isn't stable
+// ---------------------------------------------------------------------------
+
+// Drops `--flag value` pairs from an argv list.
+function withoutValueFlags(argv, flags) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (flags.includes(argv[i])) {
+      i++;
+      continue;
+    }
+    out.push(argv[i]);
+  }
+  return out;
+}
+
+// A finding's identity across runs: page, viewport, rule and elements, minus the run-specific bracketed detail.
+function findingKey(result, v) {
+  const nodes = (v.nodes || []).map((n) => n.replace(/\s*\[[^\]]*\]\s*$/, '')).join(',');
+  return `${result.label} | ${v.viewport || ''} | ${v.id} | ${nodes}`;
+}
+
+async function runRepeated(args, rawArgv) {
+  const runs = Math.min(Math.max(Math.floor(args.repeat), 2), 50);
+  const childArgs = withoutValueFlags(rawArgv, ['--repeat', '--json-report']).concat(['--no-progress', '--no-color']);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a11y-gate-repeat-'));
+  const outcomes = [];
+
+  console.log(c.cyan(`Running the audit ${runs} times to check that its results are stable...`));
+  for (let i = 1; i <= runs; i++) {
+    const reportPath = path.join(tmpDir, `run-${i}.json`);
+    const exitCode = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [__filename, ...childArgs, '--json-report', reportPath], {
+        cwd: process.cwd(),
+        env: Object.assign({}, process.env, { A11Y_GATE_REPEAT_CHILD: '1' }),
+        stdio: 'ignore',
+      });
+      child.on('exit', (code) => resolve(code === null ? 1 : code));
+      child.on('error', () => resolve(1));
+    });
+
+    let report = null;
+    try {
+      report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+    } catch {
+      // the run died before writing a report
+    }
+    const failOnIndex = report ? SEVERITY_ORDER.indexOf(report.config.failOn) : -1;
+    const blocking = new Set();
+    const rechecks = new Set();
+    for (const result of (report && report.results) || []) {
+      if (result.error) blocking.add(`${result.label} | could not audit | ${result.error}`);
+      for (const v of result.violations || []) {
+        if (severityIndex(v.impact) <= failOnIndex) blocking.add(findingKey(result, v));
+      }
+      for (const r of result.focusRechecks || []) {
+        rechecks.add(`${result.label} | ${r.viewport} | ${r.descriptor.replace(/\s*\[[^\]]*\]\s*$/, '')}`);
+      }
+    }
+    outcomes.push({ run: i, exitCode, report: Boolean(report), blocking, rechecks });
+    const label = exitCode === 0 ? c.green('PASS') : c.red(`FAIL (${blocking.size || 'run error'})`);
+    console.log(`  run ${i}/${runs}: ${label}${rechecks.size ? c.yellow(`  — ${rechecks.size} focus recheck(s)`) : ''}`);
+  }
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  const counts = new Map();
+  for (const o of outcomes) for (const key of o.blocking) counts.set(key, (counts.get(key) || 0) + 1);
+  const consistent = [...counts].filter(([, n]) => n === runs).map(([key]) => key);
+  const flaky = [...counts].filter(([, n]) => n < runs).map(([key, n]) => ({ key, runs: n }));
+  const recheckCounts = new Map();
+  for (const o of outcomes) for (const key of o.rechecks) recheckCounts.set(key, (recheckCounts.get(key) || 0) + 1);
+  const failedRuns = outcomes.filter((o) => o.exitCode !== 0).length;
+
+  console.log('\n' + c.bold('Repeat summary'));
+  console.log(`  ${runs - failedRuns} of ${runs} runs passed`);
+  if (consistent.length) {
+    console.log(c.red(`  Appeared in every run (a real, stable finding): ${consistent.length}`));
+    for (const key of consistent) console.log(c.red(`    ${key}`));
+  }
+  if (flaky.length) {
+    console.log(c.yellow(`  Appeared in some runs only (an unstable measurement, not a stable result): ${flaky.length}`));
+    for (const f of flaky) console.log(c.yellow(`    ${f.key}  — ${f.runs} of ${runs} runs`));
+  }
+  if (recheckCounts.size) {
+    console.log(c.yellow('  Needed a focus recheck (passed, but not on the first look):'));
+    for (const [key, n] of recheckCounts) console.log(c.yellow(`    ${key}  — ${n} of ${runs} runs`));
+  }
+  if (!consistent.length && !flaky.length && failedRuns === 0) console.log(c.green('  ✓ Every run passed with identical results.'));
+
+  if (args.jsonReport) {
+    try {
+      fs.writeFileSync(
+        path.resolve(process.cwd(), args.jsonReport),
+        JSON.stringify({ runs, failedRuns, consistent, flaky, rechecks: [...recheckCounts] }, null, 2)
+      );
+    } catch (err) {
+      console.warn(c.yellow(`Could not write JSON report: ${err.message}`));
+    }
+  }
+  process.exit(failedRuns > 0 ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1196,6 +1445,11 @@ async function main() {
   if (args.help) {
     printHelp();
     process.exit(0);
+  }
+
+  if (args.repeat > 1 && !process.env.A11Y_GATE_REPEAT_CHILD) {
+    await runRepeated(args, process.argv.slice(2));
+    return;
   }
 
   let config, hadConfigFile;
@@ -1248,6 +1502,7 @@ async function main() {
     }
     console.log(c.cyan(`Starting server: ${config.server.command}`));
     serverProcess = startServer(config.server, cwd);
+    installServerCleanup(() => serverProcess);
     const { ready, exited } = await waitForServer(
       config.server.url,
       config.server.readyTimeout || DEFAULT_TIMEOUT_MS,
@@ -1382,12 +1637,14 @@ async function main() {
 
     const byLabel = new Map();
     for (const target of targets) {
-      byLabel.set(target.label, { label: target.label, target: target.target, error: null, violations: [], errors: [] });
+      byLabel.set(target.label, { label: target.label, target: target.target, error: null, violations: [], errors: [], focusRechecks: [], review: [] });
     }
     jobOutcomes.forEach((outcome, i) => {
       const { target, viewport } = jobs[i];
       const bucket = byLabel.get(target.label);
       bucket.violations.push(...outcome.violations);
+      if (outcome.focusRechecks) bucket.focusRechecks.push(...outcome.focusRechecks);
+      if (outcome.review) bucket.review.push(...outcome.review);
       if (outcome.error) bucket.errors.push(`[${viewport.name}] ${outcome.error}`);
     });
 
@@ -1410,6 +1667,8 @@ async function main() {
       target: r.target,
       error: r.errors.length ? r.errors.join('; ') : null,
       violations: r.violations,
+      focusRechecks: r.focusRechecks,
+      review: r.review,
     }));
   } finally {
     await browser.close();

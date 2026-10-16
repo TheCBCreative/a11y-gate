@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gradient Contrast Fixture</title>
+  <style>
+    /* Text over a gradient: axe can't compute a single background colour, so it reports "needs review", not a violation. */
+    .banner { background-image: linear-gradient(90deg, #ffffff, #000000); padding: 24px; color: #777777; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Hello</h1>
+  </header>
+  <main>
+    <div class="banner"><p>Some text on a gradient background.</p></div>
+  </main>
+</body>
+</html>

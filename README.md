@@ -340,7 +340,11 @@ re-audit pass (see [Interactive states](#interactive-states)).
 - **"Could not find Chrome"** — `puppeteer` wasn't able to download its bundled Chromium (common on
   locked-down networks/CI images). Either allow the download, or install Chromium separately and set the
   `PUPPETEER_EXECUTABLE_PATH` environment variable to its path before running.
+- **Focus-indicator failure that comes and goes between runs** — the check reads styles a couple of animation frames after focus lands, counts a focus ring drawn on the element or up to three ancestors (a card with `:has(:focus-visible)`, a field group with `:focus-within`), and re-measures any element that still looks unchanged a few times before reporting it, so one-off timing glitches don't block a build. An element that still fails every time genuinely has no visible focus style. Anything that only passed on a recheck is listed under a yellow `!` note in the output (never silent), and a failure shows whether the element matched `:focus-visible`. If the same element keeps showing up there, check its focus styling by hand.
 - **"…is already in use"** — something is already listening on the `server.url` port, usually a server left over from an interrupted run. Find it with `lsof -nP -iTCP:<port>` and stop it, or change the port in your config. The check only runs for localhost URLs.
+- **Working out whether a failure is real** — `a11y-gate --repeat 5` runs the whole audit five times and reports what appeared in every run (a real, stable finding) versus only some runs (an unstable measurement), plus any focus indicators that needed a recheck.
+- **"Needs manual review"** — items axe-core couldn't decide on (often text contrast over images, gradients or video). They never fail the build, but they're where real problems hide, so check them by eye. Hide them with `--no-incomplete` or `reportIncomplete: false`.
+- **Server left running after Ctrl-C** — the gate now stops the server it started when interrupted (SIGINT/SIGTERM) or on any other exit.
 - **Server never becomes ready** — increase `server.readyTimeout`, or confirm `server.url` matches what
   the server actually listens on (host/port/path).
 - **False positives on a specific rule** — add the axe-core rule ID to `ignoreRules` in that project's

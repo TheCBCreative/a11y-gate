@@ -250,6 +250,19 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
+  // 8b. Focus-visibility: a wrapper that draws the ring (card:has(a:focus-visible)) around a plain link counts as a
+  //     visible indicator — it is, to the user — so it must NOT be flagged.
+  {
+    const tmpDir = tmpDirWith({ 'wrapper-focus.html': path.join(FOCUS_FIXTURES, 'wrapper-focus.html') });
+    const result = await run(['--dir', tmpDir, '--fail-on', 'serious']);
+    check(
+      'does not flag a link whose wrapper draws the focus ring',
+      result.status === 0,
+      `expected exit 0, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
   // 9. --no-focus-check turns the whole check off.
   {
     const tmpDir = tmpDirWith({ 'bad-focus.html': path.join(FOCUS_FIXTURES, 'bad-focus.html') });
@@ -818,6 +831,88 @@ async function main() {
         Date.now() - started < 15000,
       `expected a fast exit 1 naming the crash, got ${result.status} after ${Date.now() - started}ms\n${result.stdout}\n${result.stderr}`
     );
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
+  // 31. Findings axe can't decide on are listed for manual review, never counted as failures, and can be hidden.
+  {
+    const tmpDir = tmpDirWith({ 'gradient-contrast.html': path.join(__dirname, 'review', 'gradient-contrast.html') });
+    const shown = await run(['--dir', tmpDir, '--fail-on', 'serious']);
+    check(
+      'axe "needs review" findings are listed but do not fail the run',
+      shown.status === 0 && shown.stdout.includes('Needs manual review'),
+      `expected exit 0 with a "Needs manual review" section, got ${shown.status}\n${shown.stdout}\n${shown.stderr}`
+    );
+    const hidden = await run(['--dir', tmpDir, '--fail-on', 'serious', '--no-incomplete']);
+    check(
+      '--no-incomplete hides the manual-review section',
+      hidden.status === 0 && !hidden.stdout.includes('Needs manual review'),
+      `expected exit 0 without the section, got ${hidden.status}\n${hidden.stdout}\n${hidden.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
+  // 32. --repeat: a clean page passes every run, and a real problem is reported as stable (appears in every run).
+  {
+    const goodDir = tmpDirWith({ 'good.html': path.join(FIXTURES, 'good.html') });
+    const good = await run(['--dir', goodDir, '--fail-on', 'critical', '--repeat', '2']);
+    check(
+      '--repeat reports identical passing runs',
+      good.status === 0 && good.stdout.includes('2 of 2 runs passed'),
+      `expected exit 0 and "2 of 2 runs passed", got ${good.status}\n${good.stdout}\n${good.stderr}`
+    );
+    const badDir = tmpDirWith({ 'bad-focus.html': path.join(FOCUS_FIXTURES, 'bad-focus.html') });
+    const bad = await run(['--dir', badDir, '--fail-on', 'serious', '--repeat', '2']);
+    check(
+      '--repeat reports a real problem as appearing in every run',
+      bad.status === 1 && bad.stdout.includes('Appeared in every run'),
+      `expected exit 1 with a stable finding, got ${bad.status}\n${bad.stdout}\n${bad.stderr}`
+    );
+    fs.rmSync(goodDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    fs.rmSync(badDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
+  // 33. Interrupting a run (Ctrl-C) must stop the server it started, so the next run's port is free.
+  if (process.platform !== 'win32') {
+    const port = await getFreePort();
+    // A page that never answers keeps the audit busy long enough to interrupt it mid-run.
+    const hang = http.createServer(() => {});
+    const hangPort = await new Promise((resolve) => hang.listen(0, '127.0.0.1', () => resolve(hang.address().port)));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a11y-gate-sigint-'));
+    const serverScript = path.join(FIXTURES, 'mini-server.js');
+    writeConfig(
+      tmpDir,
+      `{
+        urls: ['http://127.0.0.1:${hangPort}/'],
+        server: {
+          command: ${JSON.stringify(`node ${serverScript} ${port}`)},
+          url: 'http://127.0.0.1:${port}/',
+          readyTimeout: 10000,
+        },
+        failOn: 'critical',
+      }`
+    );
+    const child = spawn(process.execPath, [CLI], { cwd: tmpDir, env: process.env });
+    let out = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (out += d));
+    const exited = new Promise((resolve) => child.on('exit', resolve));
+    for (let i = 0; i < 100 && !out.includes('Server ready'); i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 300));
+    child.kill('SIGINT');
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 10000))]);
+    await new Promise((r) => setTimeout(r, 500));
+    const stillUp = await new Promise((resolve) => {
+      const sock = net.createConnection({ port, host: '127.0.0.1' });
+      sock.once('connect', () => {
+        sock.destroy();
+        resolve(true);
+      });
+      sock.once('error', () => resolve(false));
+    });
+    check('interrupting a run stops the server it started', out.includes('Server ready') && !stillUp, `server still up: ${stillUp}\n${out}`);
+    hang.closeAllConnections();
+    await closeServer(hang);
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 

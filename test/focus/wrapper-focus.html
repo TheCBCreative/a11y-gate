@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Wrapper Focus Fixture</title>
+  <style>
+    /* The link itself shows nothing, but the card around it draws the focus ring — a common pattern. */
+    a { outline: none; }
+    .card { padding: 16px; border: 1px solid #555; }
+    .card:has(a:focus-visible) { outline: 3px solid #0050d0; outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Hello</h1>
+  </header>
+  <main>
+    <div class="card">
+      <a href="#section">A link whose card draws the focus ring</a>
+    </div>
+  </main>
+</body>
+</html>
