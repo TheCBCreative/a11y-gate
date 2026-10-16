@@ -759,6 +759,68 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
+  // 29. If the server's port is already taken, fail immediately with a clear
+  //     message instead of hanging on (or silently auditing) the squatter.
+  {
+    const squatter = http.createServer((req, res) => {
+      // Accept the connection but never answer, like a wedged leftover server.
+    });
+    const port = await new Promise((resolve) => squatter.listen(0, '127.0.0.1', () => resolve(squatter.address().port)));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a11y-gate-portinuse-'));
+    const serverScript = path.join(FIXTURES, 'mini-server.js');
+    writeConfig(
+      tmpDir,
+      `{
+        urls: ['http://127.0.0.1:${port}/'],
+        server: {
+          command: ${JSON.stringify(`node ${serverScript} ${port}`)},
+          url: 'http://127.0.0.1:${port}/',
+          readyTimeout: 10000,
+        },
+        failOn: 'critical',
+      }`
+    );
+    const result = await run([], tmpDir);
+    check(
+      'a server port that is already in use fails fast with a clear message',
+      result.status === 1 && result.stderr.includes('already in use') && !result.stdout.includes('Starting server'),
+      `expected exit 1 with an "already in use" error, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    squatter.closeAllConnections();
+    await closeServer(squatter);
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
+  // 30. A server that crashes on startup is reported right away, with its
+  //     stderr, rather than after the full readyTimeout.
+  {
+    const port = await getFreePort();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a11y-gate-servercrash-'));
+    writeConfig(
+      tmpDir,
+      `{
+        urls: ['http://127.0.0.1:${port}/'],
+        server: {
+          command: ${JSON.stringify(`node -e "console.error('boom: cannot start'); process.exit(3)"`)},
+          url: 'http://127.0.0.1:${port}/',
+          readyTimeout: 20000,
+        },
+        failOn: 'critical',
+      }`
+    );
+    const started = Date.now();
+    const result = await run([], tmpDir);
+    check(
+      'a server that exits early is reported immediately with its stderr',
+      result.status === 1 &&
+        result.stderr.includes('exited early') &&
+        result.stderr.includes('boom: cannot start') &&
+        Date.now() - started < 15000,
+      `expected a fast exit 1 naming the crash, got ${result.status} after ${Date.now() - started}ms\n${result.stdout}\n${result.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
   console.log('');
   if (failures > 0) {
     console.error(`${failures} self-test(s) failed.`);

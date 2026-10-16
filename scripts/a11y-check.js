@@ -60,6 +60,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 const { spawn } = require('child_process');
 
 // ---------------------------------------------------------------------------
@@ -533,26 +534,76 @@ async function crawlSite(browser, config) {
 // Optional local server bootstrap
 // ---------------------------------------------------------------------------
 
-async function waitForServer(url, timeoutMs) {
+// Resolves true when something is already accepting connections on the
+// port in `url` (only checked for loopback URLs — a remote host's port isn't
+// ours to probe). Used before spawning the server: if the port is taken, the
+// new server would crash with EADDRINUSE while a stale one (often left over
+// from an interrupted run) answers — or hangs — in its place.
+function isPortInUse(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return Promise.resolve(false);
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (!['localhost', '127.0.0.1', '::1'].includes(host)) return Promise.resolve(false);
+  const port = Number(parsed.port) || (parsed.protocol === 'https:' ? 443 : 80);
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+    const done = (inUse) => {
+      socket.destroy();
+      resolve(inUse);
+    };
+    socket.setTimeout(1000, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+}
+
+// `server` is the handle from startServer. Resolves { ready: true } once the
+// URL answers, or { ready: false, exited?: {...} } on timeout or if the server
+// process dies first (so a crash is reported straight away, with its stderr,
+// instead of after the full timeout).
+async function waitForServer(url, timeoutMs, server) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    if (server && server.exit) return { ready: false, exited: server.exit };
     try {
-      const res = await fetch(url, { method: 'GET' });
-      if (res.ok || (res.status >= 200 && res.status < 500)) return true;
+      // Per-request timeout: a server that accepts the connection but never
+      // replies would otherwise hang this loop forever and make the
+      // readyTimeout meaningless.
+      const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(2000) });
+      if (res.ok || (res.status >= 200 && res.status < 500)) return { ready: true };
     } catch {
       // not up yet
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  return false;
+  return { ready: false, exited: server && server.exit };
 }
 
+// Returns the child with two extras: `stderr` (the last few KB the server
+// wrote there) and `exit` ({ code, signal } once it has died, else null).
 function startServer(serverConfig, cwd) {
   const child = spawn(serverConfig.command, {
     cwd,
     shell: true,
     detached: process.platform !== 'win32',
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  child.serverStderr = '';
+  child.exit = null;
+  if (child.stderr) {
+    child.stderr.on('data', (chunk) => {
+      child.serverStderr = (child.serverStderr + chunk).slice(-4000);
+    });
+  }
+  child.on('exit', (code, signal) => {
+    child.exit = { code, signal };
+  });
+  child.on('error', (err) => {
+    child.exit = { code: null, signal: null, error: err.message };
   });
   return child;
 }
@@ -1185,20 +1236,40 @@ async function main() {
 
   let serverProcess = null;
   if (config.server && config.server.command) {
-    console.log(c.cyan(`Starting server: ${config.server.command}`));
-    serverProcess = startServer(config.server, cwd);
-    const ready = await waitForServer(
-      config.server.url,
-      config.server.readyTimeout || DEFAULT_TIMEOUT_MS
-    );
-    if (!ready) {
+    if (await isPortInUse(config.server.url)) {
       console.error(
         c.red(
-          `Server did not become ready at ${config.server.url} within ${
-            config.server.readyTimeout || DEFAULT_TIMEOUT_MS
-          }ms.`
+          `a11y-check: ${config.server.url} is already in use, so the server this run would start can't bind there. ` +
+            'This is usually a server left over from an earlier run. Stop whatever is listening ' +
+            '(macOS/Linux: `lsof -nP -iTCP:<port>`), or change the port in your config.'
         )
       );
+      process.exit(1);
+    }
+    console.log(c.cyan(`Starting server: ${config.server.command}`));
+    serverProcess = startServer(config.server, cwd);
+    const { ready, exited } = await waitForServer(
+      config.server.url,
+      config.server.readyTimeout || DEFAULT_TIMEOUT_MS,
+      serverProcess
+    );
+    if (!ready) {
+      if (exited) {
+        const how = exited.error
+          ? `failed to start: ${exited.error}`
+          : `exited early (${exited.signal ? 'signal ' + exited.signal : 'code ' + exited.code})`;
+        console.error(c.red(`Server ${how} before it became ready at ${config.server.url}.`));
+        const tail = (serverProcess.serverStderr || '').trim();
+        if (tail) console.error(tail);
+      } else {
+        console.error(
+          c.red(
+            `Server did not become ready at ${config.server.url} within ${
+              config.server.readyTimeout || DEFAULT_TIMEOUT_MS
+            }ms.`
+          )
+        );
+      }
       await stopServer(serverProcess);
       process.exit(1);
     }

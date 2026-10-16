@@ -340,6 +340,7 @@ re-audit pass (see [Interactive states](#interactive-states)).
 - **"Could not find Chrome"** — `puppeteer` wasn't able to download its bundled Chromium (common on
   locked-down networks/CI images). Either allow the download, or install Chromium separately and set the
   `PUPPETEER_EXECUTABLE_PATH` environment variable to its path before running.
+- **"…is already in use"** — something is already listening on the `server.url` port, usually a server left over from an interrupted run. Find it with `lsof -nP -iTCP:<port>` and stop it, or change the port in your config. The check only runs for localhost URLs.
 - **Server never becomes ready** — increase `server.readyTimeout`, or confirm `server.url` matches what
   the server actually listens on (host/port/path).
 - **False positives on a specific rule** — add the axe-core rule ID to `ignoreRules` in that project's
