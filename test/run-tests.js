@@ -24,6 +24,9 @@ const VIEWPORT_FIXTURES = path.join(__dirname, 'viewport');
 const KEYBOARD_FIXTURES = path.join(__dirname, 'keyboard');
 const REFLOW_FIXTURES = path.join(__dirname, 'reflow');
 const INTERACTIVE_FIXTURES = path.join(__dirname, 'interactive');
+const REPORT_FIXTURES = path.join(__dirname, 'report');
+const CRAWL_FILE_FIXTURES = path.join(__dirname, 'crawl-files');
+const COMPOSITE_FIXTURES = path.join(__dirname, 'composite');
 
 let failures = 0;
 
@@ -913,6 +916,116 @@ async function main() {
     check('interrupting a run stops the server it started', out.includes('Server ready') && !stillUp, `server still up: ${stillUp}\n${out}`);
     hang.closeAllConnections();
     await closeServer(hang);
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
+  // Regression: a crawl that finds links to files (a .zip, or an extensionless URL that serves CSV) must not try to
+  // audit them as pages — each one used to become a "could not audit" error that blocked the build.
+  {
+    const port = await getFreePort();
+    const server = http.createServer((req, res) => {
+      const urlPath = (req.url || '/').split('?')[0];
+      if (urlPath === '/report.zip') {
+        res.writeHead(200, { 'Content-Type': 'application/zip' });
+        res.end(Buffer.alloc(256));
+      } else if (urlPath === '/export') {
+        res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="export.csv"' });
+        res.end('a,b\n1,2\n');
+      } else {
+        const file = path.join(CRAWL_FILE_FIXTURES, urlPath === '/' ? 'index.html' : urlPath);
+        fs.readFile(file, (err, data) => {
+          res.writeHead(err ? 404 : 200, { 'Content-Type': 'text/html' });
+          res.end(err ? 'not found' : data);
+        });
+      }
+    });
+    await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const result = await run([
+      '--crawl', `http://127.0.0.1:${port}/`, '--fail-on', 'critical', '--no-mobile', '--no-reflow', '--no-progress',
+    ]);
+    check(
+      'crawl skips links to downloads and non-HTML responses instead of failing on them',
+      result.status === 0 && result.stdout.includes('Crawl discovered 2 page(s)') && !result.stdout.includes('ERROR'),
+      `expected exit 0 with 2 pages discovered, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    await closeServer(server);
+  }
+
+  // Regression: opening each disclosure widget re-runs axe on the whole page, which used to report a violation that
+  // was already there at load once more per widget (here, 4 times instead of once).
+  {
+    const tmpDir = tmpDirWith({ 'repeated.html': path.join(INTERACTIVE_FIXTURES, 'repeated-violation.html') });
+    const result = await run([
+      '--dir', tmpDir, '--fail-on', 'critical', '--no-mobile', '--no-reflow', '--no-focus-check', '--no-progress',
+    ]);
+    const mentions = (result.stdout.match(/input-image-alt —/g) || []).length;
+    check(
+      'a violation present at load is reported once, not again after opening every widget',
+      result.status === 1 && mentions === 1 && result.stdout.includes('critical: 1 '),
+      `expected exit 1 with one input-image-alt finding, got ${result.status} and ${mentions}\n${result.stdout}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
+  // Regression: standard keyboard patterns must not be flagged as unreachable — an item inside a hidden (display:none)
+  // parent, roving-tabindex tabs, and listbox options managed with aria-activedescendant.
+  {
+    const tmpDir = tmpDirWith({ 'legit.html': path.join(COMPOSITE_FIXTURES, 'legit-patterns.html') });
+    const result = await run([
+      '--dir', tmpDir, '--fail-on', 'serious', '--no-mobile', '--no-reflow', '--no-interactive-states', '--no-progress',
+    ]);
+    check(
+      'does not flag hidden items, roving-tabindex tabs, or aria-activedescendant options as unreachable',
+      !result.stdout.includes('keyboard-operable-custom-widget'),
+      `expected no keyboard-operable-custom-widget finding\n${result.stdout}\n${result.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
+  // Regression: static file names with URL-significant characters (#, %, spaces) used to be turned into broken file://
+  // URLs, so the page failed with ERR_FILE_NOT_FOUND instead of being audited.
+  {
+    const tmpDir = tmpDirWith({ 'page #1 100%.html': path.join(FIXTURES, 'bad.html') });
+    const result = await run([
+      '--dir', tmpDir, '--fail-on', 'critical', '--no-mobile', '--no-reflow', '--no-interactive-states', '--no-progress',
+    ]);
+    check(
+      'audits static files whose names contain #, % or spaces',
+      result.status === 1 && result.stdout.includes('image-alt') && !result.stdout.includes('ERROR'),
+      `expected exit 1 with image-alt and no load error, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+
+  // Regression: when a page fails to load at one viewport, what the other viewports found must still be printed and
+  // counted — it used to be skipped entirely, so the summary showed 0 issues.
+  {
+    const port = await getFreePort();
+    const server = await serveStatic(REPORT_FIXTURES, port);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a11y-gate-'));
+    writeConfig(
+      tmpDir,
+      `{
+        urls: ['http://127.0.0.1:${port}/mobile-only-error.html'],
+        timeout: 4000,
+        failOn: 'critical',
+        checkReflow: false,
+        checkInteractiveStates: false,
+        checkFocusVisibility: false,
+        showProgress: false,
+      }`
+    );
+    const result = await run([], tmpDir);
+    check(
+      'an error at one viewport does not hide findings from the others',
+      result.status === 1 &&
+        result.stdout.includes('ERROR') &&
+        result.stdout.includes('input-image-alt') &&
+        result.stdout.includes('critical: 1 '),
+      `expected exit 1 with both the mobile error and the desktop finding, got ${result.status}\n${result.stdout}\n${result.stderr}`
+    );
+    server.closeAllConnections();
+    await closeServer(server);
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 

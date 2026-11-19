@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mobile-Only Error Fixture</title>
+</head>
+<body>
+  <main>
+    <h1>Fails to load at one viewport only</h1>
+    <!-- Critical at every viewport: an image button with no alt text. -->
+    <input type="image" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7">
+  </main>
+  <script>
+    // At a narrow (mobile) viewport, keep the network busy forever so the page never reaches network idle and the
+    // audit at that viewport times out. The desktop pass is unaffected, so its finding must still be reported.
+    if (window.screen.width < 600) {
+      setInterval(function () { fetch('/poll?' + Math.random()).catch(function () {}); }, 100);
+    }
+  </script>
+</body>
+</html>
