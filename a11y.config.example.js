@@ -150,7 +150,11 @@ module.exports = {
   // `name`, and can set `extraRules` the way the built-in mobile one does):
   // viewports: [
   //   { name: 'desktop', width: 1280, height: 900 },
-  //   { name: 'mobile', width: 375, height: 667, isMobile: true, hasTouch: true, deviceScaleFactor: 2, extraRules: ['target-size'] },
+  //   {
+  //     name: 'mobile', width: 375, height: 667,
+  //     isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+  //     extraRules: ['target-size'],
+  //   },
   //   { name: 'tablet', width: 768, height: 1024 },
   // ],
   //
