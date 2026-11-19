@@ -8,19 +8,22 @@
   <main>
     <h1>Widgets that are keyboard-operable without tabindex="0" on every item</h1>
 
-    <!-- A closed menu: the item's own computed style is fine, but its parent is display:none, so it isn't on screen. -->
+    <!-- A closed menu: the item's own computed style is fine, but its parent is
+         display:none, so it isn't on screen. -->
     <div style="display: none">
       <div role="menuitem" onclick="void 0">Hidden menu item</div>
     </div>
 
-    <!-- Roving tabindex: only the selected tab is in the tab order; arrow keys move between the rest. -->
+    <!-- Roving tabindex: only the selected tab is in the tab order; arrow keys
+         move between the rest. -->
     <div role="tablist" aria-label="Sections">
       <button role="tab" aria-selected="true" tabindex="0">One</button>
       <span role="tab" aria-selected="false" tabindex="-1">Two</span>
       <span role="tab" aria-selected="false" tabindex="-1">Three</span>
     </div>
 
-    <!-- aria-activedescendant: the listbox keeps focus and points at the active option. -->
+    <!-- aria-activedescendant: the listbox keeps focus and points at the active
+         option. -->
     <div role="listbox" tabindex="0" aria-label="Fruit" aria-activedescendant="opt-1">
       <div role="option" id="opt-1" aria-selected="true">Apple</div>
       <div role="option" id="opt-2" aria-selected="false">Pear</div>

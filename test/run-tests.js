@@ -112,7 +112,8 @@ function closeServer(server) {
 async function main() {
   console.log('Running a11y-gate self-tests...\n');
 
-  // 1. Fixtures dir has a critical violation (missing alt, unlabeled button) -> must block
+  // 1. Fixtures dir has a critical violation (missing alt, unlabeled button)
+  //    -> must block
   {
     const result = await run(['--dir', FIXTURES, '--fail-on', 'critical']);
     check(
@@ -253,8 +254,9 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // 8b. Focus-visibility: a wrapper that draws the ring (card:has(a:focus-visible)) around a plain link counts as a
-  //     visible indicator — it is, to the user — so it must NOT be flagged.
+  // 8b. Focus-visibility: a wrapper that draws the ring
+  //     (card:has(a:focus-visible)) around a plain link counts as a visible
+  //     indicator — it is, to the user — so it must NOT be flagged.
   {
     const tmpDir = tmpDirWith({ 'wrapper-focus.html': path.join(FOCUS_FIXTURES, 'wrapper-focus.html') });
     const result = await run(['--dir', tmpDir, '--fail-on', 'serious']);
@@ -612,7 +614,7 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // 22. A violation only present once a dropdown is opened must still be caught.
+  // 22. A violation only present once a dropdown is opened is still caught.
   {
     const tmpDir = tmpDirWith({ 'dropdown.html': path.join(INTERACTIVE_FIXTURES, 'dropdown.html') });
     const result = await run(['--dir', tmpDir, '--fail-on', 'critical']);
@@ -837,7 +839,8 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // 31. Findings axe can't decide on are listed for manual review, never counted as failures, and can be hidden.
+  // 31. Findings axe can't decide on are listed for manual review, never
+  // counted as failures, and can be hidden.
   {
     const tmpDir = tmpDirWith({ 'gradient-contrast.html': path.join(__dirname, 'review', 'gradient-contrast.html') });
     const shown = await run(['--dir', tmpDir, '--fail-on', 'serious']);
@@ -855,7 +858,8 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // 32. --repeat: a clean page passes every run, and a real problem is reported as stable (appears in every run).
+  // 32. --repeat: a clean page passes every run, and a real problem is reported
+  // as stable (appears in every run).
   {
     const goodDir = tmpDirWith({ 'good.html': path.join(FIXTURES, 'good.html') });
     const good = await run(['--dir', goodDir, '--fail-on', 'critical', '--repeat', '2']);
@@ -875,10 +879,12 @@ async function main() {
     fs.rmSync(badDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // 33. Interrupting a run (Ctrl-C) must stop the server it started, so the next run's port is free.
+  // 33. Interrupting a run (Ctrl-C) must stop the server it started, so the
+  // next run's port is free.
   if (process.platform !== 'win32') {
     const port = await getFreePort();
-    // A page that never answers keeps the audit busy long enough to interrupt it mid-run.
+    // A page that never answers keeps the audit busy long enough to
+    // interrupt it mid-run.
     const hang = http.createServer(() => {});
     const hangPort = await new Promise((resolve) => hang.listen(0, '127.0.0.1', () => resolve(hang.address().port)));
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a11y-gate-sigint-'));
@@ -919,8 +925,9 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // Regression: a crawl that finds links to files (a .zip, or an extensionless URL that serves CSV) must not try to
-  // audit them as pages — each one used to become a "could not audit" error that blocked the build.
+  // Regression: a crawl that finds links to files (a .zip, or an extensionless
+  // URL that serves CSV) must not try to audit them as pages — each one used to
+  // become a "could not audit" error that blocked the build.
   {
     const port = await getFreePort();
     const server = http.createServer((req, res) => {
@@ -951,8 +958,9 @@ async function main() {
     await closeServer(server);
   }
 
-  // Regression: opening each disclosure widget re-runs axe on the whole page, which used to report a violation that
-  // was already there at load once more per widget (here, 4 times instead of once).
+  // Regression: opening each disclosure widget re-runs axe on the whole page,
+  // which used to report a violation that was already there at load once more
+  // per widget (here, 4 times instead of once).
   {
     const tmpDir = tmpDirWith({ 'repeated.html': path.join(INTERACTIVE_FIXTURES, 'repeated-violation.html') });
     const result = await run([
@@ -967,8 +975,9 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // Regression: standard keyboard patterns must not be flagged as unreachable — an item inside a hidden (display:none)
-  // parent, roving-tabindex tabs, and listbox options managed with aria-activedescendant.
+  // Regression: standard keyboard patterns must not be flagged as unreachable —
+  // an item inside a hidden (display:none) parent, roving-tabindex tabs, and
+  // listbox options managed with aria-activedescendant.
   {
     const tmpDir = tmpDirWith({ 'legit.html': path.join(COMPOSITE_FIXTURES, 'legit-patterns.html') });
     const result = await run([
@@ -982,8 +991,9 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // Regression: static file names with URL-significant characters (#, %, spaces) used to be turned into broken file://
-  // URLs, so the page failed with ERR_FILE_NOT_FOUND instead of being audited.
+  // Regression: static file names with URL-significant characters (#, %,
+  // spaces) used to be turned into broken file:// URLs, so the page failed with
+  // ERR_FILE_NOT_FOUND instead of being audited.
   {
     const tmpDir = tmpDirWith({ 'page #1 100%.html': path.join(FIXTURES, 'bad.html') });
     const result = await run([
@@ -997,8 +1007,9 @@ async function main() {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
-  // Regression: when a page fails to load at one viewport, what the other viewports found must still be printed and
-  // counted — it used to be skipped entirely, so the summary showed 0 issues.
+  // Regression: when a page fails to load at one viewport, what the other
+  // viewports found must still be printed and counted — it used to be skipped
+  // entirely, so the summary showed 0 issues.
   {
     const port = await getFreePort();
     const server = await serveStatic(REPORT_FIXTURES, port);

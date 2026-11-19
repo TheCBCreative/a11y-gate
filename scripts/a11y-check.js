@@ -38,9 +38,11 @@
  *   --no-interactive-states  Skip re-auditing pages after opening menus/modals/etc
  *   --max-triggers <n>     Cap on interactive elements opened per page (default: 5)
  *   --json-report <path>   Write a full JSON report to this path
- *   --no-incomplete        Don't list the findings axe-core couldn't decide on ("needs review")
- *   --repeat <n>           Run the whole audit n times and report any finding that doesn't show up every
- *                          time — a quick way to tell a real problem from a flaky measurement
+ *   --no-incomplete        Don't list the findings axe-core couldn't decide
+ *                          on ("needs review")
+ *   --repeat <n>           Run the whole audit n times and report any finding
+ *                          that doesn't show up every time — a quick way to
+ *                          tell a real problem from a flaky measurement
  *   --no-progress          Disable the progress bar/milestone output
  *   --no-color             Disable colored output
  *   --help                 Show this help text
@@ -81,9 +83,10 @@ const DEFAULT_MAX_CRAWL_PAGES = 200;
 const DEFAULT_MAX_CRAWL_DEPTH = 25;
 const DEFAULT_MOTION_SETTLE_MS = 300;
 const DEFAULT_MAX_FOCUS_STOPS = 400;
-// An element that looks unchanged on focus is re-checked this many times (after a short pause) before it's
-// reported. A real missing indicator is unchanged every time; a one-off is a style recalculation or an in-flight
-// animation caught mid-frame, which settles on the next look.
+// An element that looks unchanged on focus is re-checked this many times (after
+// a short pause) before it's reported. A real missing indicator is unchanged
+// every time; a one-off is a style recalculation or an in-flight animation
+// caught mid-frame, which settles on the next look.
 const FOCUS_RECHECKS = 3;
 const FOCUS_RECHECK_DELAY_MS = 80;
 const DEFAULT_REFLOW_WIDTH = 320; // 1280px design ÷ 400% zoom, per WCAG 1.4.10's own worked example
@@ -283,12 +286,13 @@ function loadConfig(args, cwd) {
         maxDepth: DEFAULT_MAX_CRAWL_DEPTH,
         includeExternal: false,
       },
-      // Keyboard focus-visibility check (tabs through every reachable
-      // element and flags any with no visible focus state). This is on by
-      // default because axe-core has no equivalent rule.
-      // axe-core sorts what it can't decide (often text contrast over images or video) into an "incomplete"
-      // list. Those aren't failures, but they're where real problems hide, so they're listed for a human to check.
+      // axe-core sorts what it can't decide (often text contrast over images or
+      // video) into an "incomplete" list. Those aren't failures, but they're
+      // where real problems hide, so they're listed for a human to check.
       reportIncomplete: true,
+      // Keyboard focus-visibility check (tabs through every reachable element
+      // and flags any with no visible focus state). This is on by default
+      // because axe-core has no equivalent rule.
       checkFocusVisibility: true,
       focusVisibility: {
         maxStops: DEFAULT_MAX_FOCUS_STOPS,
@@ -377,7 +381,7 @@ function loadConfig(args, cwd) {
     config.viewports = [DEFAULT_VIEWPORTS[0]];
   }
 
-  // Auto-detect static output dirs only if nothing was configured or passed at all
+  // Auto-detect static output dirs only if nothing was configured or passed
   const nothingConfigured =
     !hadConfigFile && config.urls.length === 0 && config.staticDirs.length === 0 && config.crawl.from.length === 0;
   if (nothingConfigured) {
@@ -442,8 +446,9 @@ function collectStaticAndUrlTargets(config, cwd) {
     const files = walkHtmlFiles(abs, config.staticExtensions, config.excludePaths);
     for (const f of files) {
       const label = isAbsoluteDir ? f : path.relative(cwd, f);
-      // pathToFileURL percent-encodes characters that mean something in a URL (`#`, `?`, `%`, spaces) and turns
-      // Windows drive paths into a valid file:///C:/... URL. Plain 'file://' + path broke on both.
+      // pathToFileURL percent-encodes characters that mean something in a URL
+      // (`#`, `?`, `%`, spaces) and turns Windows drive paths into a valid
+      // file:///C:/... URL. Plain 'file://' + path broke on both.
       const targetUrl = pathToFileURL(f).href;
       const key = 'file:' + targetUrl;
       if (seen.has(key)) continue;
@@ -470,8 +475,9 @@ function normalizeUrl(rawUrl) {
   }
 }
 
-// Links to these are files, not pages: Chromium downloads them (or shows them in a viewer) instead of rendering a
-// DOM axe can audit, so following one only produces a "could not audit" error that blocks the build.
+// Links to these are files, not pages: Chromium downloads them (or shows them
+// in a viewer) instead of rendering a DOM axe can audit, so following one only
+// produces a "could not audit" error that blocks the build.
 const NON_PAGE_EXTENSIONS = new Set(
   (
     'pdf zip gz tgz tar rar 7z bz2 xz dmg exe msi pkg deb rpm apk iso bin ' +
@@ -511,9 +517,10 @@ async function crawlSite(browser, config) {
     if (visited.has(url)) continue;
     visited.add(url);
 
-    // Load the page before counting it, so a link that turns out to be a download or a non-HTML response (one
-    // without a telltale extension, like /export?format=csv) is dropped here instead of failing the audit later.
-    // Pages at maxDepth are loaded too: it's the only way to know they're pages.
+    // Load the page before counting it, so a link that turns out to be a
+    // download or a non-HTML response (one without a telltale extension, like
+    // /export?format=csv) is dropped here instead of failing the audit later.
+    // Pages at maxDepth are loaded too, since that's the only way to tell.
     const page = await browser.newPage();
     let hrefs = [];
     let isPage = true;
@@ -530,7 +537,8 @@ async function crawlSite(browser, config) {
       }
     } catch (err) {
       if (/net::ERR_ABORTED/.test(err.message)) {
-        // A navigation that turns into a download aborts this way — it's a file, not a broken page.
+        // A navigation that turns into a download aborts this way — it's a
+        // file, not a broken page.
         isPage = false;
       } else {
         // A page that fails to load during discovery still gets audited (and
@@ -582,9 +590,10 @@ async function crawlSite(browser, config) {
 // Optional local server bootstrap
 // ---------------------------------------------------------------------------
 
-// Stops the server this run started if the run is interrupted (Ctrl-C, a CI cancel) or exits any other way. Without
-// this, the server — started in its own process group — outlives the run and holds its port, so the next run
-// fails with "already in use".
+// Stops the server this run started if the run is interrupted (Ctrl-C, a CI
+// cancel) or exits any other way. Without this, the server — started in its own
+// process group — outlives the run and holds its port, so the next run fails
+// with "already in use".
 function installServerCleanup(getServer) {
   const onSignal = (signal, code) => () => {
     console.error(c.yellow(`\na11y-check: received ${signal} — stopping the server and exiting.`));
@@ -592,7 +601,8 @@ function installServerCleanup(getServer) {
   };
   process.once('SIGINT', onSignal('SIGINT', 130));
   process.once('SIGTERM', onSignal('SIGTERM', 143));
-  // Last resort for any other way out (an unexpected error, process.exit): kill the server's process group.
+  // Last resort for any other way out (an unexpected error, process.exit): kill
+  // the server's process group.
   process.on('exit', () => {
     const child = getServer();
     if (!child || child.exit || process.platform === 'win32') return;
@@ -719,12 +729,15 @@ function stopServer(child) {
 // Focus-visibility check (real keyboard traversal — axe has no equivalent)
 // ---------------------------------------------------------------------------
 
-// Measures whether focusing `key`'s element changes how it looks: the element itself, plus up to three ancestors,
-// because plenty of designs draw the focus ring on a wrapper (a card with `:has(:focus-visible)`, a field group with
-// `:focus-within`) while the focused control itself stays plain. Both readings are taken two animation frames after the
-// state change so pending style updates have landed, rather than the instant focus moves. The element ends up focused
-// again, as it was. Returns { gone: true } if the element left the page, otherwise { changedLevel } where -1 means
-// nothing changed, 0 the element itself, and 1+ an ancestor.
+// Measures whether focusing `key`'s element changes how it looks: the element
+// itself, plus up to three ancestors, because plenty of designs draw the focus
+// ring on a wrapper (a card with `:has(:focus-visible)`, a field group with
+// `:focus-within`) while the focused control itself stays plain. Both readings
+// are taken two animation frames after the state change so pending style
+// updates have landed, rather than the instant focus moves. The element ends up
+// focused again, as it was. Returns { gone: true } if the element left the
+// page, otherwise { changedLevel } where -1 means nothing changed, 0 the
+// element itself, and 1+ an ancestor.
 const FOCUS_ANCESTOR_LEVELS = 4; // the element + 3 ancestors
 
 async function measureFocusChange(page, key) {
@@ -860,7 +873,8 @@ async function auditFocusVisibility(page, focusConfig) {
     if (!changed) {
       flagged.push(`${info.descriptor} [looked unchanged on all ${looks} checks; matched :focus-visible: ${info.matchedFocusVisible}]`);
     } else if (!firstLookChanged) {
-      // Passed only on a recheck: not a failure, but never silent — a real flicker is worth knowing about.
+      // Passed only on a recheck: not a failure, but never silent — a real
+      // flicker is worth knowing about.
       rechecked.push(`${info.descriptor} [passed on recheck ${looks - 1}; matched :focus-visible at first look: ${info.matchedFocusVisible}]`);
     }
   }
@@ -882,9 +896,11 @@ async function auditKeyboardOperability(page) {
   return page.evaluate(() => {
     const NATIVE_FOCUSABLE = new Set(['a', 'button', 'input', 'select', 'textarea', 'summary', 'audio', 'video', 'iframe']);
     const INTERACTIVE_ROLES = new Set(['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio', 'switch', 'option']);
-    // Composite widgets where only one item is meant to be in the tab order and arrow keys move between the rest
-    // (roving tabindex), or where the container keeps focus and points at the active item (aria-activedescendant).
-    // The items' tabindex="-1" is the correct pattern there, not a keyboard barrier.
+    // Composite widgets where only one item is meant to be in the tab order and
+    // arrow keys move between the rest (roving tabindex), or where the
+    // container keeps focus and points at the active item
+    // (aria-activedescendant). The items' tabindex="-1" is the correct pattern
+    // there, not a keyboard barrier.
     const COMPOSITE_SELECTOR =
       '[role="tablist"], [role="listbox"], [role="menu"], [role="menubar"], [role="radiogroup"], ' +
       '[role="tree"], [role="treegrid"], [role="grid"], [role="toolbar"], [role="combobox"]';
@@ -899,8 +915,9 @@ async function auditKeyboardOperability(page) {
       if (group.hasAttribute('aria-activedescendant') || isTabbable(group)) return true;
       return Array.from(group.querySelectorAll('*')).some((other) => other !== node && isTabbable(other));
     };
-    // checkVisibility() also catches an element hidden by an ancestor (a closed menu with display:none), which the
-    // element's own computed style doesn't show.
+    // checkVisibility() also catches an element hidden by an ancestor (a
+    // closed menu with display:none), which the element's own computed style
+    // doesn't reveal.
     const isRendered = (node) => {
       if (typeof node.checkVisibility === 'function') {
         return node.checkVisibility({ visibilityProperty: true });
@@ -1035,9 +1052,11 @@ async function discoverInteractiveTriggers(page, max) {
   );
 }
 
-// The axe pass after opening a trigger re-checks the whole page, so everything already found at load (or after an
-// earlier trigger) comes back again. `seen` holds "rule|element" keys for what's already reported; only elements not
-// in it are kept, and they're added to it, so each finding is reported once per viewport, under whatever revealed it.
+// The axe pass after opening a trigger re-checks the whole page, so everything
+// already found at load (or after an earlier trigger) comes back again. `seen`
+// holds "rule|element" keys for what's already reported; only elements not in
+// it are kept, and they're added to it, so each finding is reported once per
+// viewport, under whatever revealed it.
 function axeNodeKey(ruleId, node) {
   return `${ruleId}|${node.target.join(' ')}`;
 }
@@ -1323,7 +1342,8 @@ function printReport(results, config) {
     if (!result.error && result.violations.length === 0) continue;
 
     console.log(`\n${c.bold(result.label)}`);
-    // An error at one viewport doesn't erase what the other viewports found, so print and count those too.
+    // An error at one viewport doesn't erase what the other viewports found, so
+    // print and count those too.
     if (result.error) {
       erroredTargets++;
       console.log(`  ${c.red('ERROR')}  could not audit this target: ${result.error}`);
@@ -1353,7 +1373,7 @@ function printReport(results, config) {
     );
   }
 
-  // Findings axe couldn't decide on — informational, never part of the pass/fail result.
+  // Findings axe couldn't decide on: informational, never part of pass/fail.
   const reviewByRule = new Map();
   for (const r of results) {
     for (const item of r.review || []) {
@@ -1420,7 +1440,8 @@ function withoutValueFlags(argv, flags) {
   return out;
 }
 
-// A finding's identity across runs: page, viewport, rule and elements, minus the run-specific bracketed detail.
+// A finding's identity across runs: page, viewport, rule and elements, minus
+// the run-specific bracketed detail.
 function findingKey(result, v) {
   const nodes = (v.nodes || []).map((n) => n.replace(/\s*\[[^\]]*\]\s*$/, '')).join(',');
   return `${result.label} | ${v.viewport || ''} | ${v.id} | ${nodes}`;
