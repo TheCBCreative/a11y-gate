@@ -66,6 +66,7 @@ const path = require('path');
 const net = require('net');
 const os = require('os');
 const { spawn } = require('child_process');
+const { pathToFileURL } = require('url');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -441,7 +442,9 @@ function collectStaticAndUrlTargets(config, cwd) {
     const files = walkHtmlFiles(abs, config.staticExtensions, config.excludePaths);
     for (const f of files) {
       const label = isAbsoluteDir ? f : path.relative(cwd, f);
-      const targetUrl = 'file://' + f;
+      // pathToFileURL percent-encodes characters that mean something in a URL (`#`, `?`, `%`, spaces) and turns
+      // Windows drive paths into a valid file:///C:/... URL. Plain 'file://' + path broke on both.
+      const targetUrl = pathToFileURL(f).href;
       const key = 'file:' + targetUrl;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -467,6 +470,23 @@ function normalizeUrl(rawUrl) {
   }
 }
 
+// Links to these are files, not pages: Chromium downloads them (or shows them in a viewer) instead of rendering a
+// DOM axe can audit, so following one only produces a "could not audit" error that blocks the build.
+const NON_PAGE_EXTENSIONS = new Set(
+  (
+    'pdf zip gz tgz tar rar 7z bz2 xz dmg exe msi pkg deb rpm apk iso bin ' +
+    'doc docx xls xlsx ppt pptx odt ods odp rtf csv tsv txt json xml rss atom ics vcf ' +
+    'jpg jpeg png gif webp avif svg ico bmp tif tiff heic ' +
+    'mp3 wav ogg oga m4a flac aac mp4 m4v webm mov avi mkv ' +
+    'woff woff2 ttf otf eot css js mjs map wasm'
+  ).split(' ')
+);
+
+function looksLikeNonPageUrl(url) {
+  const match = /\.([a-z0-9]+)$/i.exec(new URL(url).pathname);
+  return Boolean(match) && NON_PAGE_EXTENSIONS.has(match[1].toLowerCase());
+}
+
 async function crawlSite(browser, config) {
   const seeds = (config.crawl.from || []).map(normalizeUrl).filter(Boolean);
   if (seeds.length === 0) return [];
@@ -490,7 +510,49 @@ async function crawlSite(browser, config) {
     const { url, depth } = queue.shift();
     if (visited.has(url)) continue;
     visited.add(url);
+
+    // Load the page before counting it, so a link that turns out to be a download or a non-HTML response (one
+    // without a telltale extension, like /export?format=csv) is dropped here instead of failing the audit later.
+    // Pages at maxDepth are loaded too: it's the only way to know they're pages.
+    const page = await browser.newPage();
+    let hrefs = [];
+    let isPage = true;
+    try {
+      // Link discovery only needs the DOM, not a fully idle network — using
+      // the same networkidle0 wait as the real audit here just adds
+      // per-page latency (and risk) for no benefit while crawling.
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: config.timeout });
+      const contentType = (response && response.headers()['content-type']) || '';
+      if (contentType && !/html/i.test(contentType)) {
+        isPage = false;
+      } else if (depth < maxDepth) {
+        hrefs = await page.evaluate(() => Array.from(document.querySelectorAll('a[href]')).map((a) => a.href));
+      }
+    } catch (err) {
+      if (/net::ERR_ABORTED/.test(err.message)) {
+        // A navigation that turns into a download aborts this way — it's a file, not a broken page.
+        isPage = false;
+      } else {
+        // A page that fails to load during discovery still gets audited (and
+        // reported as an error) in the normal audit pass below — no need to
+        // do anything special here beyond not following its links.
+        console.warn(c.yellow(`  (crawl) could not load ${url}: ${err.message}`));
+      }
+    } finally {
+      await page.close();
+    }
+    if (!isPage) continue;
     discovered.push(url);
+
+    for (const href of hrefs) {
+      const norm = normalizeUrl(href);
+      if (!norm || visited.has(norm) || looksLikeNonPageUrl(norm)) continue;
+      const isAllowed = config.crawl.includeExternal || allowedOrigins.has(new URL(norm).origin);
+      if (!isAllowed) continue;
+      if (!queue.some((q) => q.url === norm)) {
+        queue.push({ url: norm, depth: depth + 1 });
+      }
+    }
 
     if (config.showProgress) {
       if (isTTY) {
@@ -500,35 +562,6 @@ async function crawlSite(browser, config) {
         lastCrawlLogAt = discovered.length;
         console.log(c.cyan(`  Crawling... ${discovered.length} page(s) found so far, ${queue.length} queued`));
       }
-    }
-
-    if (depth >= maxDepth) continue;
-
-    const page = await browser.newPage();
-    try {
-      // Link discovery only needs the DOM, not a fully idle network — using
-      // the same networkidle0 wait as the real audit here just adds
-      // per-page latency (and risk) for no benefit while crawling.
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: config.timeout });
-      const hrefs = await page.evaluate(() =>
-        Array.from(document.querySelectorAll('a[href]')).map((a) => a.href)
-      );
-      for (const href of hrefs) {
-        const norm = normalizeUrl(href);
-        if (!norm || visited.has(norm)) continue;
-        const isAllowed = config.crawl.includeExternal || allowedOrigins.has(new URL(norm).origin);
-        if (!isAllowed) continue;
-        if (!queue.some((q) => q.url === norm)) {
-          queue.push({ url: norm, depth: depth + 1 });
-        }
-      }
-    } catch (err) {
-      // A page that fails to load during discovery still gets audited (and
-      // reported as an error) in the normal audit pass below — no need to
-      // do anything special here beyond not following its links.
-      console.warn(c.yellow(`  (crawl) could not load ${url}: ${err.message}`));
-    } finally {
-      await page.close();
     }
   }
 
@@ -849,6 +882,32 @@ async function auditKeyboardOperability(page) {
   return page.evaluate(() => {
     const NATIVE_FOCUSABLE = new Set(['a', 'button', 'input', 'select', 'textarea', 'summary', 'audio', 'video', 'iframe']);
     const INTERACTIVE_ROLES = new Set(['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio', 'switch', 'option']);
+    // Composite widgets where only one item is meant to be in the tab order and arrow keys move between the rest
+    // (roving tabindex), or where the container keeps focus and points at the active item (aria-activedescendant).
+    // The items' tabindex="-1" is the correct pattern there, not a keyboard barrier.
+    const COMPOSITE_SELECTOR =
+      '[role="tablist"], [role="listbox"], [role="menu"], [role="menubar"], [role="radiogroup"], ' +
+      '[role="tree"], [role="treegrid"], [role="grid"], [role="toolbar"], [role="combobox"]';
+    const isTabbable = (node) => {
+      const t = node.getAttribute('tabindex');
+      if (t !== null) return Number(t) >= 0;
+      return node.matches('a[href], button, input, select, textarea, summary, [contenteditable=""], [contenteditable="true"]');
+    };
+    const isReachableViaComposite = (node) => {
+      const group = node.parentElement && node.parentElement.closest(COMPOSITE_SELECTOR);
+      if (!group) return false;
+      if (group.hasAttribute('aria-activedescendant') || isTabbable(group)) return true;
+      return Array.from(group.querySelectorAll('*')).some((other) => other !== node && isTabbable(other));
+    };
+    // checkVisibility() also catches an element hidden by an ancestor (a closed menu with display:none), which the
+    // element's own computed style doesn't show.
+    const isRendered = (node) => {
+      if (typeof node.checkVisibility === 'function') {
+        return node.checkVisibility({ visibilityProperty: true });
+      }
+      const style = getComputedStyle(node);
+      return node.getClientRects().length > 0 && style.visibility !== 'hidden';
+    };
     const flagged = [];
 
     for (const el of document.querySelectorAll('body *')) {
@@ -863,8 +922,9 @@ async function auditKeyboardOperability(page) {
       const isFocusable = tabindex !== null && Number(tabindex) >= 0;
       if (isFocusable) continue; // already reachable — fine
 
-      const style = getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden') continue; // not actually on screen
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue; // deliberately inoperable
+      if (!isRendered(el)) continue; // not actually on screen
+      if (isReachableViaComposite(el)) continue; // reached with arrow keys inside its group
 
       const idAttr = el.id ? '#' + el.id : '';
       const text = (el.textContent || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 40);
@@ -975,7 +1035,14 @@ async function discoverInteractiveTriggers(page, max) {
   );
 }
 
-async function auditInteractionState(browser, target, viewport, config, axeSource, trigger) {
+// The axe pass after opening a trigger re-checks the whole page, so everything already found at load (or after an
+// earlier trigger) comes back again. `seen` holds "rule|element" keys for what's already reported; only elements not
+// in it are kept, and they're added to it, so each finding is reported once per viewport, under whatever revealed it.
+function axeNodeKey(ruleId, node) {
+  return `${ruleId}|${node.target.join(' ')}`;
+}
+
+async function auditInteractionState(browser, target, viewport, config, axeSource, trigger, seen) {
   const page = await browser.newPage();
   const { name, extraRules, ...puppeteerViewport } = viewport;
   await page.setViewport(puppeteerViewport);
@@ -1029,16 +1096,21 @@ async function auditInteractionState(browser, target, viewport, config, axeSourc
 
     const axeResults = await page.evaluate((opts) => window.axe.run(document, opts), axeOptions);
     const stateLabel = `${name} · after opening ${trigger.descriptor}`;
-    outcome.violations = axeResults.violations.map((v) => ({
-      id: v.id,
-      impact: v.impact || 'unknown',
-      viewport: stateLabel,
-      description: v.description,
-      help: v.help,
-      helpUrl: v.helpUrl,
-      nodes: v.nodes.map((n) => n.target.join(' ')).slice(0, 5),
-      nodeCount: v.nodes.length,
-    }));
+    for (const v of axeResults.violations) {
+      const revealed = v.nodes.filter((n) => !seen.has(axeNodeKey(v.id, n)));
+      if (revealed.length === 0) continue;
+      for (const n of revealed) seen.add(axeNodeKey(v.id, n));
+      outcome.violations.push({
+        id: v.id,
+        impact: v.impact || 'unknown',
+        viewport: stateLabel,
+        description: v.description,
+        help: v.help,
+        helpUrl: v.helpUrl,
+        nodes: revealed.map((n) => n.target.join(' ')).slice(0, 5),
+        nodeCount: revealed.length,
+      });
+    }
   } catch (err) {
     // A misidentified trigger that navigates lands here — not a hard
     // failure, the rest of the page's audit is still valid.
@@ -1158,8 +1230,10 @@ async function auditTargetAtViewport(browser, target, viewport, config, axeSourc
 
     if (config.checkInteractiveStates) {
       const triggers = await discoverInteractiveTriggers(page, config.interactiveStates.maxTriggers);
+      const seen = new Set();
+      for (const v of axeResults.violations) for (const n of v.nodes) seen.add(axeNodeKey(v.id, n));
       for (const trigger of triggers) {
-        const stateOutcome = await auditInteractionState(browser, target, viewport, config, axeSource, trigger);
+        const stateOutcome = await auditInteractionState(browser, target, viewport, config, axeSource, trigger, seen);
         outcome.violations.push(...stateOutcome.violations);
       }
     }
@@ -1246,16 +1320,14 @@ function printReport(results, config) {
   let erroredTargets = 0;
 
   for (const result of results) {
-    if (result.error) {
-      erroredTargets++;
-      console.log(`\n${c.bold(result.label)}`);
-      console.log(`  ${c.red('ERROR')}  could not audit this target: ${result.error}`);
-      continue;
-    }
-
-    if (result.violations.length === 0) continue;
+    if (!result.error && result.violations.length === 0) continue;
 
     console.log(`\n${c.bold(result.label)}`);
+    // An error at one viewport doesn't erase what the other viewports found, so print and count those too.
+    if (result.error) {
+      erroredTargets++;
+      console.log(`  ${c.red('ERROR')}  could not audit this target: ${result.error}`);
+    }
     for (const v of result.violations) {
       counts[v.impact] = (counts[v.impact] || 0) + 1;
       const blocking = severityIndex(v.impact) <= failOnIndex;
